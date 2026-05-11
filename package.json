@@ -1,0 +1,33 @@
+{
+  "name": "mock-vite-migration",
+  "type": "module",
+  "version": "1.0.0",
+  "description": "Mock project for Vite migration - mirrors local.so.com architecture",
+  "scripts": {
+    "dev": "cross-env NODE_ENV=development npx rollup --config ./rollup/rollup.config.dev.mjs --watch",
+    "build": "cross-env NODE_ENV=production npx rollup --config ./rollup/rollup.config.prod.mjs",
+    "serve": "npx serve pages -l 3000"
+  },
+  "dependencies": {
+    "pinia": "^2.3.1",
+    "vue": "^3.2.13"
+  },
+  "devDependencies": {
+    "@rollup/plugin-commonjs": "^28.0.3",
+    "@rollup/plugin-json": "^6.0.0",
+    "@rollup/plugin-node-resolve": "^16.0.1",
+    "@rollup/plugin-replace": "^6.0.2",
+    "@rollup/plugin-terser": "^0.4.3",
+    "cross-env": "^7.0.3",
+    "cssnano": "^5.0.6",
+    "postcss": "^8.2.15",
+    "postcss-nested": "^5.0.5",
+    "postcss-simple-vars": "^6.0.3",
+    "rollup": "^3",
+    "rollup-plugin-filesize": "^10.0.0",
+    "rollup-plugin-postcss": "^4.0.0",
+    "rollup-plugin-vue": "^6.0.0",
+    "@vue/compiler-sfc": "^3.2.13",
+    "serve": "^14.0.0"
+  }
+}

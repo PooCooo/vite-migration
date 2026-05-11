@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>Mock Home Page</title>
+  <!-- 模拟 PHP 页面提供的全局对象（原项目由服务端注入） -->
+  <script>
+    window.So = {
+      comm: {
+        resCDNDomain: 's4.ssl.qhres2.com',
+        isajax: false,
+        loaderConfig: {},
+        monitor: { bv: 'mock-biz-version' }
+      },
+      lib: {
+        log: function(type, data) {
+          console.log('[So.lib.log]', type, data);
+        }
+      }
+    };
+    window.__performancetime__ = {
+      header_server_render_start: 0, header_server_render_end: 0,
+      header_client_render_start: 0, header_client_render_end: 0,
+      body_server_render_start: 0,   body_server_render_end: 0,
+      body_client_render_start: 0,   body_client_render_end: 0,
+      server_render_time_count: 0,   engine_request_time_count: 0,
+    };
+  </script>
+
+  <!-- Vue CDN（external 依赖，与 rollup external: ['vue'] 对应） -->
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+
+  <!-- _loader_res.js（自研模块加载器） -->
+  <script src="../resource/js/common/_loader_res.js"></script>
+</head>
+<body>
+  <h1>Mock 首页（模拟 PHP 模板）</h1>
+
+  <!-- searchbox 模块挂载点 -->
+  <div id="home-searchbox"></div>
+
+  <!-- skin 模块挂载点 -->
+  <div id="home-skin"></div>
+
+  <!-- homeAI 模块挂载点 -->
+  <div id="home-ai-main"></div>
+
+  <script>
+    // 模拟 PHP 模板中的 _loader.add + _loader.use 调用
+    _loader.add('home-searchbox', '../resource/js/dist/home/searchbox.js');
+    _loader.add('home-skin',      '../resource/js/dist/home/skin.js');
+    _loader.add('home-ai',        '../resource/js/dist/homeAI/homeAI.js');
+
+    _loader.use('home-searchbox', function() {
+      console.log('[loader] home-searchbox loaded');
+    });
+
+    _loader.use('home-skin', function() {
+      console.log('[loader] home-skin loaded');
+    });
+
+    _loader.use('home-ai', function() {
+      console.log('[loader] home-ai loaded');
+    });
+  </script>
+</body>
+</html>

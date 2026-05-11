@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>Mock Result Page</title>
+  <script>
+    window.So = {
+      comm: {
+        resCDNDomain: 's4.ssl.qhres2.com',
+        isajax: false,
+        loaderConfig: {},
+        monitor: { bv: 'mock-biz-version' }
+      },
+      lib: {
+        log: function(type, data) {
+          console.log('[So.lib.log]', type, data);
+        }
+      }
+    };
+    window.__performancetime__ = {
+      header_server_render_start: 0, header_server_render_end: 0,
+      header_client_render_start: 0, header_client_render_end: 0,
+      body_server_render_start: 0,   body_server_render_end: 0,
+      body_client_render_start: 0,   body_client_render_end: 0,
+      server_render_time_count: 0,   engine_request_time_count: 0,
+    };
+  </script>
+
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script src="../resource/js/common/_loader_res.js"></script>
+</head>
+<body>
+  <h1>Mock 结果页（模拟 PHP 模板）</h1>
+
+  <!-- ai-searchbox 模块挂载点 -->
+  <div id="result-ai-searchbox"></div>
+
+  <script>
+    _loader.add('result-ai-searchbox', '../resource/js/dist/result/ai-searchbox.js');
+
+    _loader.use('result-ai-searchbox', function() {
+      console.log('[loader] result-ai-searchbox loaded');
+    });
+  </script>
+</body>
+</html>
