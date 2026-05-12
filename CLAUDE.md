@@ -241,16 +241,62 @@ HTML 中预留占位符：
 3. 修改 `dev/home/searchbox/index.js` 入口 → 触发 full-reload（合理行为）
 4. 跨模块切换：访问 `pages/result.html`，验证 ai-searchbox 模块也能 HMR
 
-### Step 6：生产构建对齐
+### Step 6：生产构建对齐（Modern ESM + Legacy SystemJS 双发）
 
-1. 写 `vite.config.js` 的 `build` 段，多入口 IIFE 输出
-2. `external: ['vue']`，`globals: { vue: 'Vue' }`
-3. 接入 `@vitejs/plugin-legacy`
-4. 对比产物：`resource/js/dist/home/searchbox.js`（Vite vs Rollup）
-  - 产物结构（IIFE 包裹）
-  - external 处理（`window.Vue` 引用）
-  - polyfill bundle 是否独立出来
-5. 在浏览器中直接打开 `pages/home.html`（不走 dev server），验证 prod 产物可工作
+> 经过方案讨论，Step 6 不再延续原 Rollup 的"全量 IIFE"产物结构，而是直接走阶段三最终态的**双发架构**，把 `_loader_res.js` 的改造一并提前到 mock 中验证。原 Rollup 产物仍保留作为体积/行为对比的基线。
+
+#### 双发架构总览
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│ 现代浏览器（'noModule' in HTMLScriptElement.prototype）        │
+│   _loader.use(name, cb)                                       │
+│     → import('/resource/js/dist/home/searchbox.js')          │
+│         ├─ 业务 chunk（ESM）                                  │
+│         └─ vendor/vue-[hash].js（共享 chunk，跨入口自动去重）   │
+├──────────────────────────────────────────────────────────────┤
+│ 老浏览器（IE / 不支持 ESM）                                    │
+│   HTML 已通过 nomodule 静态注入：                              │
+│     - SystemJS runtime                                       │
+│     - polyfills-legacy.js (core-js + regenerator)            │
+│   _loader.use(name, cb)                                       │
+│     → System.import('/resource/js/dist/home/searchbox-legacy.js')│
+└──────────────────────────────────────────────────────────────┘
+```
+
+#### 关键决策
+
+| 决策项 | 选择 | 理由 |
+| --- | --- | --- |
+| Modern 产物格式 | **ESM**（不再 IIFE） | 享受 Vite code-splitting，Vue 自动抽 vendor chunk 跨入口共享 |
+| Legacy 产物格式 | **SystemJS**（plugin-legacy 默认） | 在 IE 上保留 ESM 语义、仍能 code-split；多付 ~3KB runtime |
+| Vue 处理 | **不做 external，纳入依赖图** | Modern 端共享 chunk 去重 + tree-shake；Legacy 端依赖 SystemJS 共享 chunk |
+| Polyfill 引导 | **HTML 静态注入 `nomodule` SystemJS + polyfills** | 与 plugin-legacy 设计对齐；modern 浏览器 0 开销 |
+| `_loader_res.js` | **改造 `add` / `use`，能力检测分流**；其他 API（addAll 等）保留 | 用户裁定：阶段三 `_loader_res.js` 可改 |
+| 产物输出目录 | 先输出到 `resource/js/dist-vite/` | 保留 Rollup 产物作对比基线，确认无误再切回 `dist/` |
+
+#### 实施步骤
+
+1. **依赖安装**（已完成）：`@vitejs/plugin-legacy`、`terser`
+2. **`vite.config.js` build 段补全**：
+   - `build.outDir = 'resource/js/dist-vite'`
+   - `build.rollupOptions.output.entryFileNames = '[name].js'`（保留 `<area>/<name>` 路径，去 hash、去 `assets/` 前缀）
+   - `build.rollupOptions.output.chunkFileNames = 'vendor/[name]-[hash].js'`（共享 vendor chunk 落点）
+   - 接入 `@vitejs/plugin-legacy`：`renderLegacyChunks: true`，`polyfills` / `modernPolyfills` 按需，固定 polyfill 产物名（去 hash）
+3. **HTML 模板改造**：在原 `<!--LOADER-->` 占位符基础上，prod 分支额外注入 `<script nomodule>` SystemJS runtime + polyfills；占位符方案二选一（合并到 `<!--LOADER-->` 注入，或新增 `<!--LEGACY-POLYFILL-->`）
+4. **`_loader_res.js` 改造**：
+   - 新增能力检测：`var supportsModule = 'noModule' in HTMLScriptElement.prototype`
+   - `add(name, url)`：保存 modern URL，同时按规则推导 legacy URL（`/foo/bar.js` → `/foo/bar-legacy.js`）
+   - `use(name, cb)`：modern 走 `new Function('u','return import(u)')(modernUrl)`；legacy 走 `System.import(legacyUrl)`
+   - 其他 API（addAll 等）暂不改
+5. **产物对比验证**：跑 `npx vite build`，确认
+   - 产物落点正确（`dist-vite/home/searchbox.js`、`dist-vite/home/searchbox-legacy.js` 等）
+   - 共享 vendor chunk 确实生成且 Vue 被抽出
+   - Legacy 产物为 SystemJS 格式
+6. **浏览器双场景实测**：
+   - Modern：Chrome 直接 `npx serve . -l 3000` 访问 `pages/home.html`
+   - Legacy：DevTools 关掉 ESM 支持（或模拟旧 UA），验证 SystemJS 分支
+7. **dev shim 兼容确认**：dev shim 覆盖 `_loader.use`，会完全替换新版 `_loader_res.js` 的 use，能力检测分支在 dev 阶段不会触发，无冲突
 
 ## 已知风险与边界 case
 
@@ -262,7 +308,10 @@ HTML 中预留占位符：
 | `import()` 是异步的，原 `_loader.use` callback 也是异步的，但执行时机不完全一致                               | mock 中验证多模块顺序依赖场景，必要时用 `Promise.all` 保序                             |
 | Vite dev server 的 ESM 模块带 query（`?import`、`?t=`），路径含 hash 时映射可能失效                       | 反推规则使用 url 主干，忽略 query                                              |
 | `@vitejs/plugin-legacy` 输出的 polyfill bundle 文件名 hash 化，与现有 `polyfill_home.min.js` 路径不一致 | prod 配置中固定 `entryFileNames`，或在 PHP 模板侧通过 manifest 引用                |
-| 多入口 IIFE 输出时，公共 chunk（splitChunks）如何处理                                                  | Vite 默认会拆 chunk，IIFE 模式下需禁用 manualChunks 或配置 `inlineDynamicImports` |
+| plugin-legacy 默认会改写 HTML 自动注入 modern/legacy script                                       | 已有自定义 `htmlInjector()`，需关掉 plugin-legacy 的 HTML 注入（或让两者执行顺序明确），改由我们自己控制 |
+| Modern ESM 下 Vue 共享 chunk 的实际形态                                                          | Step 6 build 完后实测，确认 `vendor/vue-*.js` 真的被多入口共享                       |
+| Legacy SystemJS 产物相对路径解析与原生 import 不同                                                    | `_loader_res.js` 在 legacy 分支显式拼绝对 URL 再传给 `System.import`              |
+| Modern 与 Legacy URL 推导规则                                                                 | `add(name, url)` 中保存 modern URL，legacy URL 由 `url.replace(/\.js$/, '-legacy.js')` 推导 |
 
 
 ## 决策检查点（阶段二完成后）
@@ -283,9 +332,11 @@ HTML 中预留占位符：
 | Dev 环境 `_loader` 处理 | Shim 拦截 `window._loader.use`                 | 业务代码零改动，HMR 完整       |
 | 模块名 → 路径映射          | URL 反推 + 显式覆盖兜底                              | 零维护，特殊模块仍可手动声明       |
 | HTML 模板区分 dev/prod  | 单 HTML + Vite plugin transform 注入            | 接近未来 PHP 模板的处理方式     |
-| 生产 IIFE 输出          | `build.rollupOptions` 多入口 + `format: 'iife'` | 兼容现有部署，无需改 `_loader` |
+| 生产产物格式（Modern）      | **ESM**（不再 IIFE）                             | 共享 vendor chunk 跨入口去重 Vue，享受 Vite tree-shake / code-split |
+| 生产产物格式（Legacy）      | **SystemJS**（plugin-legacy 默认）               | IE 上保留 ESM 语义、仍能 code-split；多付 ~3KB runtime |
 | Polyfill            | `@vitejs/plugin-legacy`                      | 官方维护，替换自定义插件         |
-| Vue 依赖              | 保持 external + CDN                            | 不改部署，风险最低            |
+| Vue 依赖              | **不 external，纳入依赖图**                         | Modern 端共享 chunk 自动去重 + tree-shake，比 external 体积更小 |
+| `_loader_res.js`    | **改造 add / use 做能力检测分流**（其他 API 保留）          | 用户裁定阶段三 `_loader_res.js` 可改 |
 
 
 ---
@@ -419,37 +470,54 @@ var libNames = list.filter(function (n) { return !devUrlMap[n]; }); // → origU
 - 工作目录干净，最后一个 commit 是 `10e6fb0 阶段二 Step 3-5: 实现 dev shim 拦截及 HTML 注入插件`（领先 origin/main 1 个 commit，未推送）
 - `vite.config.js` 已包含：多入口扫描 + `htmlInjector()` 插件
 - `resource/js/common/_loader_dev_shim.js` 已落地，dev 期拦截链路完整
-- 还没有：生产构建配置（external/iife/产物路径对齐/plugin-legacy）
+- 还没有：生产构建配置（Modern ESM + Legacy SystemJS 双发 / plugin-legacy 接入 / `_loader_res.js` 改造）
+- 已完成（2026-05-13）：`@vitejs/plugin-legacy` + `terser` 已通过 `npm install -D` 安装到位
 - 原 rollup 链路仍可用：`npm run build` 产出仍是基线
 
-## 下次继续：Step 6 — 生产构建对齐
+## 下次继续：Step 6 — 生产构建对齐（Modern ESM + Legacy SystemJS 双发）
 
-目标：让 `npx vite build` 的产物结构与原 Rollup 完全一致，PHP/HTML 模板无需改 prod 路径即可替换。
+> **方案已敲定**（2026-05-13 与用户讨论确认）：不再延续 Rollup 的"全量 IIFE"，直接走阶段三最终架构 —— Modern ESM + Legacy SystemJS 双发，Vue 不 external，纳入依赖图自动抽 vendor chunk；`_loader_res.js` 改造 `add` / `use` 做能力检测分流。完整方案见上一章「Step 6：生产构建对齐」。
 
-### 待办清单
+### 待办清单（按顺序执行）
 
-1. **依赖安装**（动手前需用户确认）：
-   - `@vitejs/plugin-legacy`（IE 兼容 + polyfill）
-   - `terser`（plugin-legacy 默认依赖，用于 ES5 压缩）
+1. **依赖安装**：`@vitejs/plugin-legacy`、`terser` —— **已完成**（2026-05-13）。注意安装时 npm audit 报了 16 个漏洞，未处理，必要时跑 `npm audit fix`。
 
-2. **`vite.config.js` 的 `build` 段补全**：
-   - `rollupOptions.external: ['vue']`，`output.globals: { vue: 'Vue' }`
-   - `output.format: 'iife'`
-   - `output.entryFileNames`：精确落到 `resource/js/dist/{home,result,homeAI}/<name>.js`（去 hash、去 `assets/` 前缀）
-   - `output.assetFileNames`：CSS 落点也要对齐
-   - 关闭 / 控制 `manualChunks`（IIFE 不支持 code-split，必要时 `inlineDynamicImports: true`）
-   - `outDir` 应设为项目根，让 `resource/js/dist/...` 直接覆盖原 rollup 产物（注意备份或先输出到临时目录对比）
+2. **`vite.config.js` build 段补全**：
+   - `build.outDir = 'resource/js/dist-vite'`（先与原 Rollup 产物隔离，对比无误后再决定是否切回 `dist/`）
+   - `build.rollupOptions.output.entryFileNames = '[name].js'`（保留 `<area>/<name>` 路径，去 hash、去 `assets/` 前缀）
+   - `build.rollupOptions.output.chunkFileNames = 'vendor/[name]-[hash].js'`（共享 vendor chunk 落点）
+   - `build.rollupOptions.output.assetFileNames`：CSS 落点也对齐
+   - 接入 `@vitejs/plugin-legacy`：`renderLegacyChunks: true`，`polyfills` / `modernPolyfills` 按需，固定 polyfill 产物文件名（去 hash）
+   - **不要**配 `external: ['vue']` —— 这是与之前计划的主要区别，Vue 纳入依赖图由 Vite 自动抽 vendor chunk 跨入口共享
+   - **关闭** plugin-legacy 默认的 HTML 注入（由我们的 `htmlInjector()` 统一控制），需调研具体配置项
 
-3. **接入 `@vitejs/plugin-legacy`**：
-   - 控制 polyfill 产物文件名（默认 hash 化），考虑 `entryFileNames`/`chunkFileNames` 钩子或 manifest 方案
+3. **HTML 注入插件升级**：
+   - prod 分支额外注入 `<script nomodule>` SystemJS runtime + `polyfills-legacy.js`
+   - 占位符方案二选一：合并到现有 `<!--LOADER-->` 注入，或新增 `<!--LEGACY-POLYFILL-->`
 
-4. **产物对比**（Vite vs Rollup）：
-   - `resource/js/dist/home/searchbox.js`：IIFE 包裹结构、`window.Vue` 引用、体积
-   - polyfill bundle 是否独立、文件名是否稳定
-   - CSS 拆分点是否一致
+4. **`_loader_res.js` 改造**（其他 API 保留）：
+   - 新增能力检测：`var supportsModule = 'noModule' in HTMLScriptElement.prototype`
+   - `add(name, url)`：保存 modern URL，按规则推导 legacy URL（`/foo/bar.js` → `/foo/bar-legacy.js`）
+   - `use(name, cb)`：
+     - modern → `new Function('u','return import(u)')(modernUrl)`（沿用 dev shim 的规避手法，避免 Vite 静态分析改写）
+     - legacy → `System.import(legacyUrl)`（注意显式拼绝对 URL，SystemJS 相对路径解析与原生 import 不同）
 
-5. **prod 验证**：
-   - 不启 Vite dev server，直接用 `npx serve . -l 3000` 打开 `http://localhost:3000/pages/home.html`，确认走的是 prod 注入路径（Vue CDN + `_loader_res.js`，无 shim），且业务模块都能正常加载渲染
+5. **产物对比验证**：跑 `npx vite build`，确认
+   - 产物落到 `resource/js/dist-vite/home/searchbox.js`、`searchbox-legacy.js` 等
+   - `vendor/vue-*.js` 共享 chunk 生成且被多个入口引用
+   - Legacy 产物为 `System.register(...)` 格式
+   - `polyfills-legacy.js` 文件名稳定（去 hash）
+
+6. **浏览器双场景实测**：
+   - Modern：`npx serve . -l 3000` 访问 `http://localhost:3000/pages/home.html`，确认走 modern 分支、vendor chunk 共享生效、所有业务模块渲染正常
+   - Legacy：DevTools 关掉 ESM 支持（或模拟旧 UA），验证 SystemJS 分支能正常加载 polyfills + legacy bundle + 渲染业务模块
+
+7. **dev shim 兼容性确认**：dev shim 覆盖 `_loader.use`，会完全替换新版 `_loader_res.js` 的 use 实现，能力检测分支在 dev 阶段不会触发，理论上无冲突。Step 6 改完后跑一次 `npm run dev:vite` 复测 HMR。
+
+### Step 6 完成后
+
+- 产物对比无误后，把 `outDir` 从 `dist-vite/` 切回 `dist/`（或保留双目录由部署侧选择）
+- 整理「迁移兼容性清单」交付阶段三（见上文「决策检查点」章节）
 
 ## 重要上下文 / 容易踩的坑
 
