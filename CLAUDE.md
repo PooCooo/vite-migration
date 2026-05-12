@@ -288,3 +288,80 @@ HTML 中预留占位符：
 | Vue 依赖              | 保持 external + CDN                            | 不改部署，风险最低            |
 
 
+---
+
+# 阶段三方向参考：分层加载架构
+
+> 阶段三在原项目落地，不在 mock 范围内。本节作为方向锚点：阶段二的 shim 设计本质上是这套架构在 dev 期的体现，阶段三只需把这个分工推广到生产即可。
+
+## 核心问题：IE 兼容下，jQuery 等全局库怎么办
+
+ESM 迁移有两个互相独立的层面，容易混在一起：
+
+1. **模块系统**：业务代码用什么格式分发（ESM vs IIFE）
+2. **运行时依赖**：jQuery、Vue 这些库本身能不能在 IE 上跑
+
+`@vitejs/plugin-legacy` 只解决第 1 个问题——通过 `<script type="module">` + `<script nomodule>` 双发，业务代码在 IE 上走 ES5 IIFE 版本。
+
+但 jQuery 等全局库本身**就是 UMD/IIFE 格式，从来不是 ESM**——它不存在"迁移到 ESM"这件事。硬塞进 Vite 依赖图会带来：
+
+- 每个 chunk 重复打包（体积爆炸），或
+- 配 `external` 让它继续走全局（绕一圈又回到原点）
+
+## 设计原则：按"模块类型"分层，而不是按"浏览器版本"分层
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ Layer 1: 全局运行时（所有浏览器都加载）                    │
+│   <script src="jquery.min.js">                          │  ← 走"瘦身版 _loader" 或直接 <script>
+│   <script src="solib-*.js">                             │
+│                                                         │
+│   IE 上额外加载：                                         │
+│   <script src="polyfills-legacy.js">                    │  ← plugin-legacy 产物
+├─────────────────────────────────────────────────────────┤
+│ Layer 2: 业务模块（双发，浏览器自动二选一）                  │
+│   现代浏览器：                                            │
+│     <script type="module" src=".../searchbox.esm.js">   │
+│   IE：                                                   │
+│     <script nomodule src=".../searchbox-legacy.js">     │
+└─────────────────────────────────────────────────────────┘
+```
+
+**核心思路**：
+
+1. **全局库（jQuery、solib-* 等）的加载方式不变**——它们本来就不是 ESM，不需要"迁移"，继续走 `<script>` 标签挂全局
+2. **业务代码走 ESM 双发**——Vite + `plugin-legacy` 自动产出现代/legacy 两套，浏览器按能力自动选择
+3. **`_loader` 不是被消灭，而是被收窄职责**——只管全局库与第三方 SDK，不再管业务模块
+
+## 与阶段二 shim 的对应关系
+
+阶段二的 `_loader_dev_shim` 内部已经做了这个分工：
+
+```js
+var bizNames = list.filter(function (n) { return devUrlMap[n]; });  // → import()
+var libNames = list.filter(function (n) { return !devUrlMap[n]; }); // → origUse
+```
+
+这个 `bizNames` vs `libNames` 的分流**不只是 dev 期的权宜**，正是阶段三的最终态。
+
+## 迁移目标的重新表述
+
+| 旧目标               | 新目标                                          |
+| ----------------- | -------------------------------------------- |
+| 干掉 `_loader`      | 把 `_loader` 从"业务模块加载器"退化为"全局库加载器"            |
+| 业务 + 库都走 ESM 依赖图  | 业务走 ESM 依赖图，库继续走全局 `<script>`                |
+
+新目标的实施风险显著低于旧目标：
+
+- IE 上 jQuery 老业务代码（散落的内联 `<script>`、独立 JS 文件）完全照常工作，因为它们引用的 `window.jQuery` 由 Layer 1 提供
+- 现代浏览器享受 ESM + HMR + tree-shaking 全套
+- `_loader` 代码量大幅缩减（保留注册/去重/缓存能力，删除"模块依赖图"相关逻辑），迁移粒度可控
+
+## 阶段三需要确认的事项
+
+- 原项目中 `_loader.add` / `_loader.use` 的调用统计：业务模块 vs 全局库的实际比例
+- 全局库清单：jquery、require、solib-* 之外还有哪些必须保留为全局
+- PHP 模板读取 Vite `manifest.json` 的方案（业务模块的 hash URL 注入）
+- IE 用户占比与"是否真的要保留 nomodule 兜底"的产品决策
+
+
