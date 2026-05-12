@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "cross-env NODE_ENV=development npx rollup --config ./rollup/rollup.config.dev.mjs --watch",
     "build": "cross-env NODE_ENV=production npx rollup --config ./rollup/rollup.config.prod.mjs",
-    "serve": "npx serve pages -l 3000"
+    "serve": "npx serve . -l 3000"
   },
   "dependencies": {
     "pinia": "^2.3.1",
