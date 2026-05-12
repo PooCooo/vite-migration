@@ -365,3 +365,68 @@ var libNames = list.filter(function (n) { return !devUrlMap[n]; }); // → origU
 - IE 用户占比与"是否真的要保留 nomodule 兜底"的产品决策
 
 
+---
+
+# 阶段二进度记录
+
+> 给下一个接手的 agent：这一节记录当前实际进度，而不是计划。开始工作前先读这里，再回头对照前面的 Step 1-6 章节。
+
+## 已完成
+
+### Step 1 — 单模块跑通 Vite + HMR ✅（已 commit: `2ee8d0e`）
+
+- 安装：`vite ^8.0.12`、`@vitejs/plugin-vue ^6.0.6`（devDependencies）
+- 新建 `vite.config.js`（最小配置：`root: '.'`、`server.port: 5173`、`plugins: [vue()]`）
+- `package.json` 新增 `"dev:vite": "vite"` 脚本（保留原 `dev`/`build`/`serve`，便于和 rollup 对比）
+- Vue 在 dev 阶段走 `node_modules` 解析（`import 'vue'`），不走 CDN；prod 阶段再切回 external
+- 验收已通过：浏览器 `http://localhost:5173/pages/_dev_searchbox.html`，`Counter.vue` 改动触发组件级 HMR、count 状态保留
+
+### Step 2 — 多入口扫描 ✅（**未单独 commit**，代码已随 Step 1 一并入库）
+
+- `vite.config.js` 实现了 `scanModules()` 扫描 `dev/home/*`、`dev/result/*`，外加 `homeAI` 单文件特例
+- 当前 input map：
+  | key                    | source                              |
+  | ---------------------- | ----------------------------------- |
+  | `home/searchbox`       | `dev/home/searchbox/index.js`       |
+  | `home/skin`            | `dev/home/skin/index.js`            |
+  | `result/ai-searchbox`  | `dev/result/ai-searchbox/index.js`  |
+  | `homeAI/homeAI`        | `dev/homeAI/main.js`                |
+- key 用 `<area>/<name>` 形式，对齐原 rollup 产物路径 `resource/js/dist/<area>/<name>.js`
+- **build 验证未跑**：当时用户决定停在这里。`npx vite build` 还没执行过，4 个入口能否全部编译尚未实测
+
+## 当前状态快照（截至 2026-05-12）
+
+- 工作目录干净，最后一个 commit 是 `2ee8d0e 阶段二 Step 1: 引入 Vite + 单模块 HMR`
+- `vite.config.js` 已包含 Step 1 + Step 2 的全部内容
+- 还没有：`_loader_dev_shim.js`、HTML 注入插件、生产构建配置
+- 临时验证文件 `pages/_dev_searchbox.html` 已经不存在（Step 1 验证完已删除）
+- 原 rollup 链路仍可用：`npm run build` 产出仍是基线
+
+## 下次继续
+
+### 立即可做：验证 Step 2 build（可选）
+
+```bash
+npx vite build
+```
+
+期望：4 个入口都被识别并编译。当前未配 `external: ['vue']`/未改产物路径，所以产物会落到默认 `dist/`、且 Vue 被打进 bundle —— 这些"偏差"留给 Step 6 修，**这一步只看入口数量是否正确**。
+
+### 主线：进入 Step 3 — 写 `_loader_dev_shim.js`
+
+按 CLAUDE.md 中 "Step 3：实现 `_loader_dev_shim.js`" 章节的代码模板，落到 `resource/js/common/_loader_dev_shim.js`。
+
+接着 Step 4（HTML transform 插件 + `<!--LOADER-->` 占位符改造 `pages/home.html`、`pages/result.html`）、Step 5（端到端 dev 验证）、Step 6（prod 构建对齐）。
+
+## 重要上下文 / 容易踩的坑
+
+1. **`npm run serve` 的根目录是项目根，不是 `pages/`**：`package.json` 里已改为 `npx serve . -l 3000`，所以老链路验证时访问 `http://localhost:3000/pages/home.html`（不是根路径 `/home.html`）。`pages/*.html` 里用的是 `../resource/...` 相对路径，根目录必须是项目根才能解析到。
+
+2. **`Vue` external 在 dev 期不生效**：当前 dev 走 `node_modules`，所以 `pages/home.html` 里那行 `<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>` 在 Vite dev server 下其实是冗余的（不影响功能，但会重复加载 Vue 运行时）。HTML 注入插件（Step 4）实现后，可以把 Vue CDN 也纳入 dev/prod 差异化注入。
+
+3. **阶段三方向已和阶段二 shim 设计对齐**：见上一章"分层加载架构"。`_loader_dev_shim` 里 `bizNames` / `libNames` 分流的语义就是阶段三的最终态，不要在 Step 3 写 shim 时退化这个分工。
+
+4. **commit 习惯**：用户偏好中文 commit message，参考已有 `阶段二 Step 1: 引入 Vite + 单模块 HMR`。每个 Step 完成后用户会主动要求 commit，不要自动提交。
+
+5. **执行前确认**：涉及 npm install、commit、删除文件等动作前需要先和用户确认，不要直接动手。
+
