@@ -392,41 +392,78 @@ var libNames = list.filter(function (n) { return !devUrlMap[n]; }); // → origU
   | `result/ai-searchbox`  | `dev/result/ai-searchbox/index.js`  |
   | `homeAI/homeAI`        | `dev/homeAI/main.js`                |
 - key 用 `<area>/<name>` 形式，对齐原 rollup 产物路径 `resource/js/dist/<area>/<name>.js`
-- **build 验证未跑**：当时用户决定停在这里。`npx vite build` 还没执行过，4 个入口能否全部编译尚未实测
+- **build 验证已通过**（2026-05-13）：`npx vite build` 顺利识别并编译 4 个入口，产物默认落在 `dist/assets/` 下并带 hash，Vue 被打进 bundle（`runtime-dom.esm-bundler-*.js` 61.21 kB）。这些"偏差"已知，留给 Step 6 修正。
 
-## 当前状态快照（截至 2026-05-12）
+### Step 3 — 实现 `_loader_dev_shim.js` ✅（已 commit: `10e6fb0`）
 
-- 工作目录干净，最后一个 commit 是 `2ee8d0e 阶段二 Step 1: 引入 Vite + 单模块 HMR`
-- `vite.config.js` 已包含 Step 1 + Step 2 的全部内容
-- 还没有：`_loader_dev_shim.js`、HTML 注入插件、生产构建配置
-- 临时验证文件 `pages/_dev_searchbox.html` 已经不存在（Step 1 验证完已删除）
+- 新建 `resource/js/common/_loader_dev_shim.js`，按 CLAUDE.md 模板实现：
+  - 拦截 `_loader.add`：兼容字符串与 `{ stc: '...' }` 两种形态，用正则反推 dist URL → dev URL，写入内部 `devUrlMap`，然后回调原 `add` 保留老 `_loader` 状态
+  - 拦截 `_loader.use`：按 `devUrlMap` 命中与否将依赖列表分流为 `bizNames`（走 Vite 动态 import）与 `libNames`（回交原 `_loader`），库先于业务加载，业务用 `Promise.all` 保序后再触发 callback
+
+### Step 4 — HTML transform 插件 ✅（已 commit: `10e6fb0`）
+
+- `vite.config.js` 增加 `htmlInjector()` 插件，根据 `ctx.server != null` 判断 dev/prod：
+  - **dev**：注入 `_loader_res.js` + `_loader_dev_shim.js`（不注入 Vue CDN，dev 走 `node_modules`）
+  - **prod**：注入 Vue CDN + `_loader_res.js`（不注入 shim）
+- `pages/home.html`、`pages/result.html` 内的硬编码 `<script>` 已删除，替换为 `<!--LOADER-->` 占位符
+
+### Step 5 — 完整 dev 流程验证 ✅
+
+- `pages/home.html` 与 `pages/result.html` 端到端跑通：业务模块通过 shim → `import()` 加载，HMR 在浏览器实测生效
+- 期间踩过两个坑（已修复，记录在下方"重要上下文"）：
+  1. **正则只匹配绝对路径**：原模板用 `../resource/js/dist/...` 这种相对路径，正则放宽去掉 `^/` 限制后通过
+  2. **Vite 给 shim 文件头部注入了顶层 `import`**：因为 shim 里写了字面量 `import()`，Vite 静态分析后把它当 ESM 处理，导致 `<script>`（非 module）首行报 `Cannot use import statement outside a module`。改用 `new Function('url', 'return import(url)')` 隐藏字面量后解决
+
+## 当前状态快照（截至 2026-05-13）
+
+- 工作目录干净，最后一个 commit 是 `10e6fb0 阶段二 Step 3-5: 实现 dev shim 拦截及 HTML 注入插件`（领先 origin/main 1 个 commit，未推送）
+- `vite.config.js` 已包含：多入口扫描 + `htmlInjector()` 插件
+- `resource/js/common/_loader_dev_shim.js` 已落地，dev 期拦截链路完整
+- 还没有：生产构建配置（external/iife/产物路径对齐/plugin-legacy）
 - 原 rollup 链路仍可用：`npm run build` 产出仍是基线
 
-## 下次继续
+## 下次继续：Step 6 — 生产构建对齐
 
-### 立即可做：验证 Step 2 build（可选）
+目标：让 `npx vite build` 的产物结构与原 Rollup 完全一致，PHP/HTML 模板无需改 prod 路径即可替换。
 
-```bash
-npx vite build
-```
+### 待办清单
 
-期望：4 个入口都被识别并编译。当前未配 `external: ['vue']`/未改产物路径，所以产物会落到默认 `dist/`、且 Vue 被打进 bundle —— 这些"偏差"留给 Step 6 修，**这一步只看入口数量是否正确**。
+1. **依赖安装**（动手前需用户确认）：
+   - `@vitejs/plugin-legacy`（IE 兼容 + polyfill）
+   - `terser`（plugin-legacy 默认依赖，用于 ES5 压缩）
 
-### 主线：进入 Step 3 — 写 `_loader_dev_shim.js`
+2. **`vite.config.js` 的 `build` 段补全**：
+   - `rollupOptions.external: ['vue']`，`output.globals: { vue: 'Vue' }`
+   - `output.format: 'iife'`
+   - `output.entryFileNames`：精确落到 `resource/js/dist/{home,result,homeAI}/<name>.js`（去 hash、去 `assets/` 前缀）
+   - `output.assetFileNames`：CSS 落点也要对齐
+   - 关闭 / 控制 `manualChunks`（IIFE 不支持 code-split，必要时 `inlineDynamicImports: true`）
+   - `outDir` 应设为项目根，让 `resource/js/dist/...` 直接覆盖原 rollup 产物（注意备份或先输出到临时目录对比）
 
-按 CLAUDE.md 中 "Step 3：实现 `_loader_dev_shim.js`" 章节的代码模板，落到 `resource/js/common/_loader_dev_shim.js`。
+3. **接入 `@vitejs/plugin-legacy`**：
+   - 控制 polyfill 产物文件名（默认 hash 化），考虑 `entryFileNames`/`chunkFileNames` 钩子或 manifest 方案
 
-接着 Step 4（HTML transform 插件 + `<!--LOADER-->` 占位符改造 `pages/home.html`、`pages/result.html`）、Step 5（端到端 dev 验证）、Step 6（prod 构建对齐）。
+4. **产物对比**（Vite vs Rollup）：
+   - `resource/js/dist/home/searchbox.js`：IIFE 包裹结构、`window.Vue` 引用、体积
+   - polyfill bundle 是否独立、文件名是否稳定
+   - CSS 拆分点是否一致
+
+5. **prod 验证**：
+   - 不启 Vite dev server，直接用 `npx serve . -l 3000` 打开 `http://localhost:3000/pages/home.html`，确认走的是 prod 注入路径（Vue CDN + `_loader_res.js`，无 shim），且业务模块都能正常加载渲染
 
 ## 重要上下文 / 容易踩的坑
 
 1. **`npm run serve` 的根目录是项目根，不是 `pages/`**：`package.json` 里已改为 `npx serve . -l 3000`，所以老链路验证时访问 `http://localhost:3000/pages/home.html`（不是根路径 `/home.html`）。`pages/*.html` 里用的是 `../resource/...` 相对路径，根目录必须是项目根才能解析到。
 
-2. **`Vue` external 在 dev 期不生效**：当前 dev 走 `node_modules`，所以 `pages/home.html` 里那行 `<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>` 在 Vite dev server 下其实是冗余的（不影响功能，但会重复加载 Vue 运行时）。HTML 注入插件（Step 4）实现后，可以把 Vue CDN 也纳入 dev/prod 差异化注入。
+2. **shim 内禁止出现字面量 `import()`**：因为 shim 是普通 `<script>`（非 module），Vite 又会对内含 `import` 关键字的文件做 ESM 改写并在头部注入 `/@vite/client`。当前实现已用 `new Function('url', 'return import(url)')` 规避，后续若改动此文件务必保持这个规避手法。
 
-3. **阶段三方向已和阶段二 shim 设计对齐**：见上一章"分层加载架构"。`_loader_dev_shim` 里 `bizNames` / `libNames` 分流的语义就是阶段三的最终态，不要在 Step 3 写 shim 时退化这个分工。
+3. **shim 的 dist→dev 反推正则必须兼容相对路径**：原项目模板里 `_loader.add` 传的可能是 `../resource/js/dist/...`、`/resource/js/dist/...` 或绝对 URL，正则不要锁死开头的 `/`。当前实现已放宽。
 
-4. **commit 习惯**：用户偏好中文 commit message，参考已有 `阶段二 Step 1: 引入 Vite + 单模块 HMR`。每个 Step 完成后用户会主动要求 commit，不要自动提交。
+4. **Vue CDN 仅在 prod 注入**：`htmlInjector()` 已分环境处理。dev 走 `node_modules` 中的 Vue（HMR 需要），prod 走 CDN（external）。Step 6 配 `external: ['vue']` 时与此一致。
 
-5. **执行前确认**：涉及 npm install、commit、删除文件等动作前需要先和用户确认，不要直接动手。
+5. **阶段三方向已和阶段二 shim 设计对齐**：见上一章"分层加载架构"。`_loader_dev_shim` 里 `bizNames` / `libNames` 分流的语义就是阶段三的最终态。
+
+6. **commit 习惯**：用户偏好中文 commit message，参考已有 `阶段二 Step 1: 引入 Vite + 单模块 HMR`、`阶段二 Step 3-5: 实现 dev shim 拦截及 HTML 注入插件`。每个 Step 完成后用户会主动要求 commit，不要自动提交。
+
+7. **执行前确认**：涉及 npm install、commit、删除文件等动作前需要先和用户确认，不要直接动手。
 
