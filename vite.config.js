@@ -4,6 +4,21 @@ import { readdirSync, statSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 
+function htmlInjector() {
+  return {
+    name: 'mock-html-injector',
+    transformIndexHtml(html, ctx) {
+      const isDev = ctx.server != null;
+      const injection = isDev
+        ? `<script src="/resource/js/common/_loader_res.js"></script>
+  <script src="/resource/js/common/_loader_dev_shim.js"></script>`
+        : `<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script src="/resource/js/common/_loader_res.js"></script>`;
+      return html.replace('<!--LOADER-->', injection);
+    }
+  };
+}
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 const DEV = {
@@ -32,7 +47,7 @@ export default defineConfig({
   server: {
     port: 5173,
   },
-  plugins: [vue()],
+  plugins: [vue(), htmlInjector()],
   build: {
     rollupOptions: {
       input,
