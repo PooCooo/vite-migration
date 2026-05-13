@@ -5,16 +5,16 @@ import { readdirSync, statSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 
+// _loader_res.js / polyfills-legacy.js 已在 HTML 中静态加载（pages/*.html）。
+// 此插件只负责在 dev 阶段额外注入 _loader_dev_shim.js；prod 下保持占位符为空。
 function htmlInjector() {
   return {
     name: 'mock-html-injector',
     transformIndexHtml(html, ctx) {
       const isDev = ctx.server != null;
       const injection = isDev
-        ? `<script src="/resource/js/common/_loader_res.js"></script>
-  <script src="/resource/js/common/_loader_dev_shim.js"></script>`
-        : `<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
-  <script src="/resource/js/common/_loader_res.js"></script>`;
+        ? `<script src="/resource/js/common/_loader_dev_shim.js"></script>`
+        : '';
       return html.replace('<!--LOADER-->', injection);
     }
   };

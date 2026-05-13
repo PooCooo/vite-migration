@@ -111,12 +111,16 @@ describe('_loader_res.js', () => {
       expect(window._loader.__test__.supportsModule).toBe(true)
     })
 
-    it('业务模块走 dynamic import，URL 为 modern', async () => {
+    it('业务模块走 dynamic import，URL 为 modern + 绝对化', async () => {
       window._loader.add('home-searchbox', '/resource/js/dist-vite/home/searchbox.js')
       const cb = vi.fn()
       window._loader.use('home-searchbox', cb)
       await tick()
-      expect(mockImport).toHaveBeenCalledWith('/resource/js/dist-vite/home/searchbox.js')
+      const expected = new URL(
+        '/resource/js/dist-vite/home/searchbox.js',
+        document.baseURI
+      ).href
+      expect(mockImport).toHaveBeenCalledWith(expected)
       expect(window.System.import).not.toHaveBeenCalled()
       expect(cb).toHaveBeenCalled()
     })
@@ -168,7 +172,11 @@ describe('_loader_res.js', () => {
       const cb = vi.fn()
       window._loader.use('mylib, home-searchbox', cb)
       await tick()
-      expect(mockImport).toHaveBeenCalledWith('/resource/js/dist-vite/home/searchbox.js')
+      const expected = new URL(
+        '/resource/js/dist-vite/home/searchbox.js',
+        document.baseURI
+      ).href
+      expect(mockImport).toHaveBeenCalledWith(expected)
       expect(cb).toHaveBeenCalled()
     })
   })

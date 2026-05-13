@@ -428,7 +428,9 @@
     };
 
     /* === 业务模块（Modern ESM / Legacy SystemJS 双发）=== */
-    var supportsModule = 'noModule' in HTMLScriptElement.prototype;
+    // 调试用：URL 带 ?forceLegacy=1 时在 modern 浏览器中强制走 SystemJS 分支
+    var forceLegacy = typeof location !== 'undefined' && /[?&]forceLegacy=1\b/.test(location.search);
+    var supportsModule = !forceLegacy && ('noModule' in HTMLScriptElement.prototype);
     var bizModules = {}; // name -> { modernUrl, legacyUrl }
     // 业务入口识别（与 dev shim 反推规则一致）：兼容相对路径与绝对路径
     var BIZ_DIST_PATTERN = /resource\/js\/dist(?:-vite)?\/[^\/]+\/[^\/]+\.js/;
@@ -450,8 +452,10 @@
 
     function loadBizModule(name) {
         var cfg = bizModules[name];
+        // 显式转绝对 URL：new Function 内的 import() 的 base 是定义它的脚本 URL（_loader_res.js），
+        // 不是 document.baseURI，相对路径会被错误地相对 /resource/js/common/ 解析
         if (supportsModule) {
-            return dynamicImport(cfg.modernUrl);
+            return dynamicImport(toAbsoluteUrl(cfg.modernUrl));
         }
         return window.System.import(toAbsoluteUrl(cfg.legacyUrl));
     }

@@ -26,7 +26,20 @@
     };
   </script>
 
-  <!-- Vite Plugin 注入加载器 (Loader) 和 依赖 -->
+  <!-- 调试钩子：现代浏览器 ?forceLegacy=1 时同步注入 polyfills-legacy，强制走 legacy 分支 -->
+  <script>
+    if (/[?&]forceLegacy=1\b/.test(location.search)) {
+      document.write('<script src="../resource/js/dist-vite/polyfills-legacy.js"><\/script>');
+    }
+  </script>
+
+  <!-- 静态加载：legacy 浏览器走 polyfills-legacy（含 SystemJS + core-js），现代浏览器自动忽略 nomodule -->
+  <script nomodule src="../resource/js/dist-vite/polyfills-legacy.js"></script>
+
+  <!-- 静态加载：_loader_res（dev/prod 通用） -->
+  <script src="../resource/js/common/_loader_res.js"></script>
+
+  <!-- Dev-only：htmlInjector 在此注入 _loader_dev_shim；prod 下保持空 -->
   <!--LOADER-->
 </head>
 <body>
