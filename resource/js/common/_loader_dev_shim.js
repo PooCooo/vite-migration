@@ -23,6 +23,9 @@
   // 内部模块名 → dev 路径（add 时注册）
   var devUrlMap = {};
 
+  // 使用 new Function 隐藏动态 import，防止 Vite 静态分析注入 /@vite/client 导致普通 script 报错
+  var dynamicImport = new Function('url', 'return import(url)');
+
   // 1. 拦截 add，建立 name 到 devUrl 的映射
   var origAdd = window._loader.add;
   window._loader.add = function (name, url) {
@@ -47,9 +50,6 @@
     var bizNames = list.filter(function (n) { return devUrlMap[n]; });
     var libNames = list.filter(function (n) { return !devUrlMap[n]; });
 
-    // 使用 new Function 隐藏动态 import，防止 Vite 静态分析注入 /@vite/client 导致普通 script 报错
-    var dynamicImport = new Function('url', 'return import(url)');
-
     function loadBiz() {
       // 业务依赖走 Vite 的原生动态导入
       return Promise.all(bizNames.map(function (n) {
@@ -67,4 +67,15 @@
       });
     }
   };
+
+  // 测试钩子：仅在 window._LOADER_TEST 为 true 时曝露内部状态供 vitest 断言
+  if (window._LOADER_TEST) {
+    window._loader.__test_dev__ = {
+      get devUrlMap() { return devUrlMap; },
+      get overrides() { return overrides; },
+      distUrlToDevUrl: distUrlToDevUrl,
+      get dynamicImport() { return dynamicImport; },
+      set dynamicImport(v) { dynamicImport = v; }
+    };
+  }
 })();

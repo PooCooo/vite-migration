@@ -7,7 +7,9 @@
     "dev": "cross-env NODE_ENV=development npx rollup --config ./rollup/rollup.config.dev.mjs --watch",
     "dev:vite": "vite",
     "build": "cross-env NODE_ENV=production npx rollup --config ./rollup/rollup.config.prod.mjs",
-    "serve": "npx serve . -l 3000"
+    "serve": "npx serve . -l 3000",
+    "test": "vitest",
+    "test:run": "vitest run"
   },
   "dependencies": {
     "pinia": "^2.3.1",
@@ -24,6 +26,7 @@
     "@vue/compiler-sfc": "^3.2.13",
     "cross-env": "^7.0.3",
     "cssnano": "^5.0.6",
+    "jsdom": "^29.1.1",
     "postcss": "^8.2.15",
     "postcss-nested": "^5.0.5",
     "postcss-simple-vars": "^6.0.3",
@@ -33,6 +36,7 @@
     "rollup-plugin-vue": "^6.0.0",
     "serve": "^14.0.0",
     "terser": "^5.47.1",
-    "vite": "^8.0.12"
+    "vite": "^8.0.12",
+    "vitest": "^4.1.6"
   }
 }

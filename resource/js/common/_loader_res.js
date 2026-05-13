@@ -708,4 +708,18 @@
 		    setTimeout(sendLog)
 		});
 	})
+
+    // 测试钩子：仅在 window._LOADER_TEST 为 true 时曝露内部状态供 vitest 断言
+    if (window._LOADER_TEST) {
+        window._loader.__test__ = {
+            get bizModules() { return bizModules; },
+            get modules() { return modules; },
+            get supportsModule() { return supportsModule; },
+            distUrlToLegacy: distUrlToLegacy,
+            BIZ_DIST_PATTERN: BIZ_DIST_PATTERN,
+            get dynamicImport() { return dynamicImport; },
+            set dynamicImport(v) { dynamicImport = v; }
+        };
+    }
 })(window);
+
