@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
+import legacy from '@vitejs/plugin-legacy'
 import { readdirSync, statSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
@@ -47,10 +48,26 @@ export default defineConfig({
   server: {
     port: 5173,
   },
-  plugins: [vue(), htmlInjector()],
+  plugins: [
+    vue(),
+    legacy({
+      targets: ['defaults', 'not IE 11'],
+      renderLegacyChunks: true,
+      polyfills: true,
+      modernPolyfills: false,
+    }),
+    htmlInjector(),
+  ],
   build: {
+    outDir: 'resource/js/dist-vite',
+    emptyOutDir: true,
     rollupOptions: {
       input,
+      output: {
+        entryFileNames: '[name].js',
+        chunkFileNames: 'vendor/[name]-[hash].js',
+        assetFileNames: 'assets/[name]-[hash][extname]',
+      },
     },
   },
 })
