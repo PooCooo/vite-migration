@@ -491,45 +491,54 @@ var libNames = list.filter(function (n) { return !devUrlMap[n]; }); // → origU
 - `tests/_loader_res.test.js` + `tests/_loader_dev_shim.test.js`：覆盖 `add` / `use` 在 modern + legacy + dev 三条路径下的分流行为，混合 biz+lib 顺序保证，dev shim 完全覆盖原 use 不触发能力检测分支
 - 测试钩子模式：两个 loader 末尾都有 `if (window._LOADER_TEST) { window._loader.__test__ = {…} }` / `__test_dev__`，用 getter/setter 暴露 IIFE 内部状态（`bizModules` / `devUrlMap` / `dynamicImport` 可被 mock 替换）
 
+### Step 6d — HTML 静态注入 nomodule polyfills + 修复 modern URL 解析 ✅（已 commit: `24e2942`）
+
+- `pages/home.html`、`pages/result.html`：静态写入 `<script nomodule src="../resource/js/dist-vite/polyfills-legacy.js">` + `<script src="../resource/js/common/_loader_res.js">`
+- `vite.config.js htmlInjector()`：prod 分支变 no-op（HTML 已静态写好），dev 分支只注入 `_loader_dev_shim.js`；移除 Vue CDN 注入（Vue 现在纳入 vendor chunk）
+- `_loader_res.js` modern 路径修复：`new Function('u','return import(u)')(url)` 里 import 的 base URL 是定义这个 Function 的脚本（`_loader_res.js` 自身）所在目录，不是 `document.baseURI`，导致相对路径 `../resource/...` 被错误解析成 `/resource/js/resource/js/...`。修复：modern 分支也走 `toAbsoluteUrl()`，与 legacy 分支一致
+- `_loader_res.js` 调试开关：`?forceLegacy=1` query 强制 `supportsModule = false`，方便在现代浏览器测试 SystemJS 分支
+- `package.json`：新增 `build:vite` 脚本（保留 `build` 走 rollup 做基线对比）；`serve` 加 `--no-clean-urls` 防止 query 被 redirect 丢掉
+- 单测断言更新：业务模块测试 expected URL 从相对路径改为 `new URL(..., document.baseURI).href` 绝对形态
+
+### Step 6e — 浏览器双场景实测 + dev 回归 ✅
+
+实测三条路径都通过：
+
+1. **Dev（HMR）**：`npm run dev:vite` → `http://localhost:5173/pages/home.html`，业务模块加载 + Counter HMR OK
+2. **Prod modern**：`npm run build:vite` → `npx serve . -l 3000` → `http://localhost:3000/pages/home.html`，modern bundle + vendor chunk 加载，业务渲染 OK
+3. **Prod legacy**：同上 URL 加 `?forceLegacy=1`（开关 + `--no-clean-urls` 双重保证 query 不丢），SystemJS 分支加载 polyfills-legacy + 各 `*-legacy.js` 入口 + legacy vendor chunk，业务渲染 OK
+
 ## 当前状态快照（截至 2026-05-13）
 
-- 工作目录干净，最后一个 commit 是 `3045c71 引入 Vitest: 加测试钩子 + 单测覆盖 _loader_res / _loader_dev_shim`（领先 origin/main 4 个 commit，未推送）
-- 生产构建链路（Modern ESM + Legacy SystemJS 双发）已就绪，`npx vite build` 产物落点正确，vendor chunk 跨入口共享生效
-- `_loader_res.js` 已能力检测分流，dev shim 与之并存（dev 期完全覆盖 use，prod 期不加载 shim）
-- 单测覆盖率：核心分流路径全部有测试断言，跑 `npm run test:run` 全绿
-- 还没有：HTML prod 注入 SystemJS runtime + polyfills（Step 6d）、浏览器双场景实测（Step 6e）
-- 原 rollup 链路仍可用：`npm run build` 产出仍是基线，对比时用 `dist/` 与 `dist-vite/` 两个目录
+- 工作目录干净，最后一个 commit 是 `24e2942 阶段二 Step 6d: HTML 静态注入 nomodule polyfills + 修复 modern URL 解析`
+- 生产构建链路（Modern ESM + Legacy SystemJS 双发）端到端全通，modern + legacy + dev 三条路径浏览器实测 OK
+- `_loader_res.js` 能力检测分流稳定，modern/legacy URL 解析一致（都走 `toAbsoluteUrl`），`?forceLegacy=1` 调试开关到位
+- 单测 23/23 全绿，核心分流路径有断言保护
+- **未做**：CSS 处理（deferred 到阶段二收尾，见下文）、迁移兼容性清单交付
+- 原 rollup 链路仍可用：`npm run build` 产 `dist/`，`npm run build:vite` 产 `dist-vite/`，两套并存方便对比
 
-## 下次继续：Step 6d — HTML prod 分支注入 SystemJS runtime + polyfills
+## 下次继续：阶段二收尾
 
-> **方案已敲定**（2026-05-13 与用户讨论确认）：走 **方案 C — 手动改 HTML**。理由：mock 项目宽容度高，不需要追求和 PHP 模板完全一致的注入流程；`closeBundle` 改动 `pages/*.html` 这种隐式副作用反而不直观。
+### 1. CSS 处理（Step 6f）
 
-### 待办清单（按顺序执行）
+当前 `pages/*.html` 没有 `<link>` 标签引 CSS。业务 Vue 组件里 `import './style.css'` 在 dev 期由 vite 自动注入到 DOM，在 prod 期产物落到 `resource/js/dist-vite/assets/<name>-<hash>.css`，但 **没人加载它们**——modern ESM 入口本身不会自动拉 CSS asset，需要显式注入 `<link>`。
 
-1. **手动改 `pages/home.html` / `pages/result.html`**：
-   - 在 `<!--LOADER-->` 占位符之后（或同级）追加 `<script nomodule src="/resource/js/dist-vite/polyfills-legacy.js"></script>`
-   - 注意：plugin-legacy 默认会把 SystemJS runtime 直接 inline 注入到产物 polyfills-legacy.js 头部，所以**不需要**单独引一份 systemjs；如果 build 输出里看到 `assets/systemjs-*.js`，说明配置走的是单独 chunk 模式，则需要再加一行 `<script nomodule src=".../systemjs-*.js"></script>`
-   - dev 期访问 `pages/home.html` 走 vite dev server，浏览器是现代浏览器，`nomodule` 标签会被忽略，不影响 dev 链路
+待办：
 
-2. **`htmlInjector()` 不动**：dev 分支保持现状（`_loader_res.js` + `_loader_dev_shim.js`），prod 分支保持现状（`_loader_res.js` + Vue CDN）。SystemJS / polyfills 由方案 C 在 HTML 静态写好
+- 决定加载方式：(a) 由 `_loader_res.js` 的 `add` 接收一份 css URL 后 `loadCss()` 注入；(b) Vite 生成 manifest.json，HTML 静态写 `<link>`；(c) Vite/plugin-legacy 自带的 CSS chunk 注入（需要研究当前 ESM + nomodule 双发场景下能否生效，以及与 `_loader` 体系如何协调）
+- 与原项目对齐：看原 `_loader.add(name, url, checker, attrs)` 的 `attrs` 中是否已有 css 字段，以及原 `loadCss()` 是怎么被调的
+- mock 项目验证：给 `Counter.vue` 加 scoped 样式，确认双发链路下 css 正确加载，modern 与 legacy 是否共用同一份 CSS（理论上同一份，因为 plugin-legacy 不会重复抽 CSS）
 
-3. **跑一次 `npx vite build`**：确认产物里有 `polyfills-legacy.js`（文件名是否带 hash 决定 HTML 引用要不要走 manifest）
+### 2. 迁移兼容性清单交付（Step 6g）
 
-### Step 6e — 浏览器双场景实测 + dev 回归
+整理交付阶段三（见上文「决策检查点」章节）：
 
-1. **Modern**：`npx serve . -l 3000` 访问 `http://localhost:3000/pages/home.html`
-   - DevTools Network 看：modern 入口（`searchbox.js`）+ vendor chunk（`vendor/runtime-dom.esm-bundler-*.js`）加载，无 `searchbox-legacy.js` / `polyfills-legacy.js`
-   - 业务模块渲染正常，`Counter.vue` 计数功能 OK
-2. **Legacy**：DevTools → Sources → 关闭 "Enable JavaScript modules"，或换成 IE11 UA
-   - Network 看：`polyfills-legacy.js` + `searchbox-legacy.js` 加载，modern 入口被 `noModule` 拦截
-   - 业务模块仍能渲染（验证 SystemJS 分支 + `toAbsoluteUrl` 兜底）
-3. **dev 回归**：`npm run dev:vite` → `http://localhost:5173/pages/home.html`，确认 dev shim 仍正常拦截、HMR 仍生效
-
-### Step 6 完成后
-
-- 产物对比无误后，决定 `outDir` 是否切回 `dist/`（保留双目录由部署侧选择更安全）
-- 跑一次 `npm run test:run` 确认单测仍全绿
-- 整理「迁移兼容性清单」交付阶段三（见上文「决策检查点」章节）
+- `vite.config.js` 完整配置（可直接拷给原项目）
+- `_loader_dev_shim.js` 完整实现（已覆盖原项目所有 `_loader.add` / `_loader.use` 调用形态）
+- HTML/PHP 模板的最小改动清单（`<!--LOADER-->` 占位符 + nomodule polyfills 静态写入 + `<link>` CSS 注入）
+- `@vitejs/plugin-legacy` 与自定义 `collectPolyfillsPlugin` 的产物差异说明
+- `_loader_res.js` 的双发改造 diff（modern URL 必须 `toAbsoluteUrl`，`?forceLegacy=1` 调试开关）
+- 原项目中可能踩坑的边界 case 列表（汇总下文「重要上下文」）
 
 ## 重要上下文 / 容易踩的坑
 
@@ -560,4 +569,10 @@ var libNames = list.filter(function (n) { return !devUrlMap[n]; }); // → origU
     - 从备份恢复 → `git add -A` 剩下的 → commit
 
 11. **方案 C（手动 HTML 改动）的代价**：mock 项目可以接受。生产 PHP 项目接手后必须换成 closeBundle 或 manifest 渲染方案，不能保留方案 C；这是「mock 项目宽容化」的一次取舍，不要回流到迁移兼容性清单里推荐。
+
+12. **`new Function('u','return import(u)')(url)` 的 import base URL 是脚本自身路径，不是 `document.baseURI`**：这是踩过的最隐蔽的坑。在 `_loader_res.js`（位于 `/resource/js/common/`）里调用，传入相对路径 `../resource/js/dist-vite/...`，会被解析成 `/resource/js/resource/js/dist-vite/...`（从 `_loader_res.js` 所在目录回溯）。修复办法：modern 分支也走 `toAbsoluteUrl(url) = new URL(url, document.baseURI).href`，与 legacy 分支的 `System.import` 路径处理一致。dev shim 那边因为是 vite dev server 注入的 `<script>`，base 又是 page URL，看上去像没事——其实是巧合，规则上 modern/legacy/dev 三条都该统一过 `toAbsoluteUrl`。
+
+13. **`serve` 默认 clean URLs 会丢 query**：`npx serve . -l 3000` 默认开启 clean URLs，访问 `/pages/home.html?forceLegacy=1` 会 301 重定向到 `/pages/home`，query 被丢掉。`package.json` 的 `serve` 脚本已加 `--no-clean-urls` 永久关闭。这个坑只在测 `?forceLegacy=1` 的时候才会暴露，平时用浏览器直接访问 `.html` 也不会注意到。
+
+14. **测 SystemJS 分支用 `?forceLegacy=1` 而非真旧浏览器**：Chrome DevTools 没有"关闭 ESM 支持"开关，IE11 VM/BrowserStack 又太重。`_loader_res.js` 加了一行 `var forceLegacy = /[?&]forceLegacy=1\b/.test(location.search); var supportsModule = !forceLegacy && ('noModule' in HTMLScriptElement.prototype);`，在现代浏览器加 `?forceLegacy=1` 即可强制走 SystemJS 分支。这是 mock 项目的调试便利开关，**生产项目接手时要决定是删掉、还是改成 `__forceLegacy__` 之类的非公开 hook**——保留在生产对真实用户无害但属于"测试代码进生产"，看团队规范。
 
