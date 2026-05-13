@@ -427,13 +427,52 @@
         }
     };
 
+    /* === 业务模块（Modern ESM / Legacy SystemJS 双发）=== */
+    var supportsModule = 'noModule' in HTMLScriptElement.prototype;
+    var bizModules = {}; // name -> { modernUrl, legacyUrl }
+    // 业务入口识别（与 dev shim 反推规则一致）：兼容相对路径与绝对路径
+    var BIZ_DIST_PATTERN = /resource\/js\/dist(?:-vite)?\/[^\/]+\/[^\/]+\.js/;
+
+    function distUrlToLegacy(url) {
+        // /foo/bar.js → /foo/bar-legacy.js；保留 query 兜底：/foo/bar.js?t=1 → /foo/bar-legacy.js?t=1
+        return url.replace(/\.js(\?.*)?$/, '-legacy.js$1');
+    }
+
+    function toAbsoluteUrl(url) {
+        // SystemJS 相对路径解析与原生 import 不同，显式转绝对 URL
+        return new URL(url, document.baseURI).href;
+    }
+
+    // 用 new Function 隐藏字面量 import，防止打包工具静态分析改写
+    function dynamicImport(url) {
+        return new Function('u', 'return import(u)')(url);
+    }
+
+    function loadBizModule(name) {
+        var cfg = bizModules[name];
+        if (supportsModule) {
+            return dynamicImport(cfg.modernUrl);
+        }
+        return window.System.import(toAbsoluteUrl(cfg.legacyUrl));
+    }
+
     /* interfaces */
     window._loader = {
         /**
          * add a module
          */
         add: function(name, url, checker, attrs) {
-            // console.log('loader add: ', name);
+            // 兼容 url 为字符串或 { stc: '...' } 对象
+            var resolvedUrl = typeof url === 'string' ? url : (url && url.stc) || '';
+            if (resolvedUrl && BIZ_DIST_PATTERN.test(resolvedUrl)) {
+                // 业务模块：登记 modern + legacy URL，由 use 时分流加载，不进 modules 表
+                bizModules[name] = {
+                    modernUrl: resolvedUrl,
+                    legacyUrl: distUrlToLegacy(resolvedUrl)
+                };
+                return;
+            }
+            // 非业务（全局库等）走原逻辑
             if (!modules[name]) {
                 modules[name] = {
                     url: url,
@@ -461,8 +500,27 @@
                 }
             })(names);
             OB.DomU.ready(function(){
-                // console.log('use:', names);
-                names = names.split(/\s*,\s*/g);
+                // 分流：业务模块（ESM 双发）vs 全局库（原 _loader 加载）
+                var all = names.split(/\s*,\s*/g);
+                var bizNames = [];
+                var libNames = [];
+                for (var k = 0; k < all.length; k++) {
+                    if (bizModules[all[k]]) bizNames.push(all[k]);
+                    else libNames.push(all[k]);
+                }
+                function loadBiz() {
+                    return Promise.all(bizNames.map(loadBizModule));
+                }
+                // 全是业务模块：直接走 ESM 加载
+                if (bizNames.length && !libNames.length) {
+                    loadBiz().then(callback_wrap);
+                    return;
+                }
+                // 有库依赖：库加载完成后再加载业务（若存在）
+                var useCallback = bizNames.length
+                    ? function() { loadBiz().then(callback_wrap); }
+                    : callback_wrap;
+                names = libNames;
 
                 // 先剔除已加载且已执行的依赖，如jquery
                 for(var i = 0; i < names.length; i++) {
@@ -486,12 +544,12 @@
                     callbacks.push({
                         originRequires: [].concat(names),
                         requires: [].concat(names),
-                        fun: callback_wrap
+                        fun: useCallback
                     });
                         
                     loadsJsInOrder(names);
                 } else {
-                    callback_wrap();
+                    useCallback();
                 }
             });
         },
@@ -651,4 +709,3 @@
 		});
 	})
 })(window);
-

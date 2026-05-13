@@ -9,8 +9,8 @@
 
   function distUrlToDevUrl(url) {
     if (!url) return null;
-    // 匹配包含 resource/js/dist/<area>/<name>.js 的路径（兼容相对路径 ../ 和绝对路径 /）
-    var m = url.match(/resource\/js\/dist\/([^\/]+)\/([^\/]+)\.js$/);
+    // 匹配 resource/js/dist/<area>/<name>.js 或 resource/js/dist-vite/<area>/<name>.js（兼容相对/绝对路径）
+    var m = url.match(/resource\/js\/dist(?:-vite)?\/([^\/]+)\/([^\/]+)\.js$/);
     if (!m) return null;
     var area = m[1], name = m[2];
 
