@@ -465,58 +465,70 @@ var libNames = list.filter(function (n) { return !devUrlMap[n]; }); // → origU
   1. **正则只匹配绝对路径**：原模板用 `../resource/js/dist/...` 这种相对路径，正则放宽去掉 `^/` 限制后通过
   2. **Vite 给 shim 文件头部注入了顶层 `import`**：因为 shim 里写了字面量 `import()`，Vite 静态分析后把它当 ESM 处理，导致 `<script>`（非 module）首行报 `Cannot use import statement outside a module`。改用 `new Function('url', 'return import(url)')` 隐藏字面量后解决
 
+### Step 6a-6b — vite.config 接入 plugin-legacy + dist-vite 输出 ✅（已 commit: `630d1f9`）
+
+- `vite.config.js`：`build.outDir = 'resource/js/dist-vite'`、`entryFileNames=[name].js`、`chunkFileNames=vendor/[name]-[hash].js`、`assetFileNames=assets/[name]-[hash][extname]`、`emptyOutDir=true`
+- 接入 `@vitejs/plugin-legacy`：`targets:['defaults','not IE 11']`、`renderLegacyChunks:true`、`polyfills:true`、`modernPolyfills:false`
+- Vue **不**走 external，纳入依赖图（确认 `vendor/runtime-dom.esm-bundler-*.js` 共享 chunk 生成，约 61 kB）
+- `npx vite build` 跑通：4 个入口 → 8 个产物（modern + legacy）+ 1 份 polyfills-legacy + 1 份 systemjs runtime + vendor chunk
+
+### Step 6c — `_loader_res.js` 双发改造 + HTML 切到 dist-vite ✅（已 commit: `65b1f40`）
+
+- `_loader_res.js`：
+  - 新增 `supportsModule = 'noModule' in HTMLScriptElement.prototype` 能力检测
+  - 新增 `BIZ_DIST_PATTERN = /resource\/js\/dist(?:-vite)?\/[^\/]+\/[^\/]+\.js/`，与 dev shim 反推规则一致
+  - `add(name, url)`：业务 URL 登记到 `bizModules` 表（同时存 modernUrl + legacyUrl，legacy 由 `url.replace(/\.js(\?.*)?$/,'-legacy.js$1')` 推导），不进 `modules` 表；非业务 URL 维持原逻辑；兼容 `{ stc: '...' }` 对象形态
+  - `use(names, cb)`：拆 `bizNames` / `libNames`；biz 走 `dynamicImport(modernUrl)` 或 `System.import(toAbsoluteUrl(legacyUrl))`；混合时库先于业务，业务用 `Promise.all` 保序后再 callback
+  - 其他 API（addAll、loadCss 等）保留不动
+- `_loader_dev_shim.js`：反推正则放宽为 `dist(?:-vite)?`，兼容两种产物路径
+- `pages/home.html`、`pages/result.html`：4 处 `_loader.add` URL 全部从 `dist/` 切到 `dist-vite/`
+
+### Vitest 引入 — 单测覆盖核心分流逻辑 ✅（已 commit: `3045c71`）
+
+- 安装 `vitest ^4.1.6` + `jsdom ^29.1.1`；`package.json` 加 `test` / `test:run` 脚本
+- `vitest.config.js`：jsdom 环境，URL 设为 `http://localhost:3000/`
+- `tests/helpers.js`：用 `new Function('window', SRC)(window)` 在 jsdom 里注入 `_loader_res.js` / `_loader_dev_shim.js`，提供 `setupGlobals` / `setSupportsModule` / `loadLoaderRes` / `loadDevShim` / `resetLoader` / `tick` 等工具；桩 `XMLHttpRequest` 防止 `_loader.use('jquery',…)` 触发真实网络
+- `tests/_loader_res.test.js` + `tests/_loader_dev_shim.test.js`：覆盖 `add` / `use` 在 modern + legacy + dev 三条路径下的分流行为，混合 biz+lib 顺序保证，dev shim 完全覆盖原 use 不触发能力检测分支
+- 测试钩子模式：两个 loader 末尾都有 `if (window._LOADER_TEST) { window._loader.__test__ = {…} }` / `__test_dev__`，用 getter/setter 暴露 IIFE 内部状态（`bizModules` / `devUrlMap` / `dynamicImport` 可被 mock 替换）
+
 ## 当前状态快照（截至 2026-05-13）
 
-- 工作目录干净，最后一个 commit 是 `10e6fb0 阶段二 Step 3-5: 实现 dev shim 拦截及 HTML 注入插件`（领先 origin/main 1 个 commit，未推送）
-- `vite.config.js` 已包含：多入口扫描 + `htmlInjector()` 插件
-- `resource/js/common/_loader_dev_shim.js` 已落地，dev 期拦截链路完整
-- 还没有：生产构建配置（Modern ESM + Legacy SystemJS 双发 / plugin-legacy 接入 / `_loader_res.js` 改造）
-- 已完成（2026-05-13）：`@vitejs/plugin-legacy` + `terser` 已通过 `npm install -D` 安装到位
-- 原 rollup 链路仍可用：`npm run build` 产出仍是基线
+- 工作目录干净，最后一个 commit 是 `3045c71 引入 Vitest: 加测试钩子 + 单测覆盖 _loader_res / _loader_dev_shim`（领先 origin/main 4 个 commit，未推送）
+- 生产构建链路（Modern ESM + Legacy SystemJS 双发）已就绪，`npx vite build` 产物落点正确，vendor chunk 跨入口共享生效
+- `_loader_res.js` 已能力检测分流，dev shim 与之并存（dev 期完全覆盖 use，prod 期不加载 shim）
+- 单测覆盖率：核心分流路径全部有测试断言，跑 `npm run test:run` 全绿
+- 还没有：HTML prod 注入 SystemJS runtime + polyfills（Step 6d）、浏览器双场景实测（Step 6e）
+- 原 rollup 链路仍可用：`npm run build` 产出仍是基线，对比时用 `dist/` 与 `dist-vite/` 两个目录
 
-## 下次继续：Step 6 — 生产构建对齐（Modern ESM + Legacy SystemJS 双发）
+## 下次继续：Step 6d — HTML prod 分支注入 SystemJS runtime + polyfills
 
-> **方案已敲定**（2026-05-13 与用户讨论确认）：不再延续 Rollup 的"全量 IIFE"，直接走阶段三最终架构 —— Modern ESM + Legacy SystemJS 双发，Vue 不 external，纳入依赖图自动抽 vendor chunk；`_loader_res.js` 改造 `add` / `use` 做能力检测分流。完整方案见上一章「Step 6：生产构建对齐」。
+> **方案已敲定**（2026-05-13 与用户讨论确认）：走 **方案 C — 手动改 HTML**。理由：mock 项目宽容度高，不需要追求和 PHP 模板完全一致的注入流程；`closeBundle` 改动 `pages/*.html` 这种隐式副作用反而不直观。
 
 ### 待办清单（按顺序执行）
 
-1. **依赖安装**：`@vitejs/plugin-legacy`、`terser` —— **已完成**（2026-05-13）。注意安装时 npm audit 报了 16 个漏洞，未处理，必要时跑 `npm audit fix`。
+1. **手动改 `pages/home.html` / `pages/result.html`**：
+   - 在 `<!--LOADER-->` 占位符之后（或同级）追加 `<script nomodule src="/resource/js/dist-vite/polyfills-legacy.js"></script>`
+   - 注意：plugin-legacy 默认会把 SystemJS runtime 直接 inline 注入到产物 polyfills-legacy.js 头部，所以**不需要**单独引一份 systemjs；如果 build 输出里看到 `assets/systemjs-*.js`，说明配置走的是单独 chunk 模式，则需要再加一行 `<script nomodule src=".../systemjs-*.js"></script>`
+   - dev 期访问 `pages/home.html` 走 vite dev server，浏览器是现代浏览器，`nomodule` 标签会被忽略，不影响 dev 链路
 
-2. **`vite.config.js` build 段补全**：
-   - `build.outDir = 'resource/js/dist-vite'`（先与原 Rollup 产物隔离，对比无误后再决定是否切回 `dist/`）
-   - `build.rollupOptions.output.entryFileNames = '[name].js'`（保留 `<area>/<name>` 路径，去 hash、去 `assets/` 前缀）
-   - `build.rollupOptions.output.chunkFileNames = 'vendor/[name]-[hash].js'`（共享 vendor chunk 落点）
-   - `build.rollupOptions.output.assetFileNames`：CSS 落点也对齐
-   - 接入 `@vitejs/plugin-legacy`：`renderLegacyChunks: true`，`polyfills` / `modernPolyfills` 按需，固定 polyfill 产物文件名（去 hash）
-   - **不要**配 `external: ['vue']` —— 这是与之前计划的主要区别，Vue 纳入依赖图由 Vite 自动抽 vendor chunk 跨入口共享
-   - **关闭** plugin-legacy 默认的 HTML 注入（由我们的 `htmlInjector()` 统一控制），需调研具体配置项
+2. **`htmlInjector()` 不动**：dev 分支保持现状（`_loader_res.js` + `_loader_dev_shim.js`），prod 分支保持现状（`_loader_res.js` + Vue CDN）。SystemJS / polyfills 由方案 C 在 HTML 静态写好
 
-3. **HTML 注入插件升级**：
-   - prod 分支额外注入 `<script nomodule>` SystemJS runtime + `polyfills-legacy.js`
-   - 占位符方案二选一：合并到现有 `<!--LOADER-->` 注入，或新增 `<!--LEGACY-POLYFILL-->`
+3. **跑一次 `npx vite build`**：确认产物里有 `polyfills-legacy.js`（文件名是否带 hash 决定 HTML 引用要不要走 manifest）
 
-4. **`_loader_res.js` 改造**（其他 API 保留）：
-   - 新增能力检测：`var supportsModule = 'noModule' in HTMLScriptElement.prototype`
-   - `add(name, url)`：保存 modern URL，按规则推导 legacy URL（`/foo/bar.js` → `/foo/bar-legacy.js`）
-   - `use(name, cb)`：
-     - modern → `new Function('u','return import(u)')(modernUrl)`（沿用 dev shim 的规避手法，避免 Vite 静态分析改写）
-     - legacy → `System.import(legacyUrl)`（注意显式拼绝对 URL，SystemJS 相对路径解析与原生 import 不同）
+### Step 6e — 浏览器双场景实测 + dev 回归
 
-5. **产物对比验证**：跑 `npx vite build`，确认
-   - 产物落到 `resource/js/dist-vite/home/searchbox.js`、`searchbox-legacy.js` 等
-   - `vendor/vue-*.js` 共享 chunk 生成且被多个入口引用
-   - Legacy 产物为 `System.register(...)` 格式
-   - `polyfills-legacy.js` 文件名稳定（去 hash）
-
-6. **浏览器双场景实测**：
-   - Modern：`npx serve . -l 3000` 访问 `http://localhost:3000/pages/home.html`，确认走 modern 分支、vendor chunk 共享生效、所有业务模块渲染正常
-   - Legacy：DevTools 关掉 ESM 支持（或模拟旧 UA），验证 SystemJS 分支能正常加载 polyfills + legacy bundle + 渲染业务模块
-
-7. **dev shim 兼容性确认**：dev shim 覆盖 `_loader.use`，会完全替换新版 `_loader_res.js` 的 use 实现，能力检测分支在 dev 阶段不会触发，理论上无冲突。Step 6 改完后跑一次 `npm run dev:vite` 复测 HMR。
+1. **Modern**：`npx serve . -l 3000` 访问 `http://localhost:3000/pages/home.html`
+   - DevTools Network 看：modern 入口（`searchbox.js`）+ vendor chunk（`vendor/runtime-dom.esm-bundler-*.js`）加载，无 `searchbox-legacy.js` / `polyfills-legacy.js`
+   - 业务模块渲染正常，`Counter.vue` 计数功能 OK
+2. **Legacy**：DevTools → Sources → 关闭 "Enable JavaScript modules"，或换成 IE11 UA
+   - Network 看：`polyfills-legacy.js` + `searchbox-legacy.js` 加载，modern 入口被 `noModule` 拦截
+   - 业务模块仍能渲染（验证 SystemJS 分支 + `toAbsoluteUrl` 兜底）
+3. **dev 回归**：`npm run dev:vite` → `http://localhost:5173/pages/home.html`，确认 dev shim 仍正常拦截、HMR 仍生效
 
 ### Step 6 完成后
 
-- 产物对比无误后，把 `outDir` 从 `dist-vite/` 切回 `dist/`（或保留双目录由部署侧选择）
+- 产物对比无误后，决定 `outDir` 是否切回 `dist/`（保留双目录由部署侧选择更安全）
+- 跑一次 `npm run test:run` 确认单测仍全绿
 - 整理「迁移兼容性清单」交付阶段三（见上文「决策检查点」章节）
 
 ## 重要上下文 / 容易踩的坑
@@ -534,4 +546,18 @@ var libNames = list.filter(function (n) { return !devUrlMap[n]; }); // → origU
 6. **commit 习惯**：用户偏好中文 commit message，参考已有 `阶段二 Step 1: 引入 Vite + 单模块 HMR`、`阶段二 Step 3-5: 实现 dev shim 拦截及 HTML 注入插件`。每个 Step 完成后用户会主动要求 commit，不要自动提交。
 
 7. **执行前确认**：涉及 npm install、commit、删除文件等动作前需要先和用户确认，不要直接动手。
+
+8. **`_loader_res.js` 是 CRLF 行尾**：Edit 工具按字面匹配，CRLF 文件必须用 CRLF 串去匹配；用 sed/awk 改写时也要保留 `\r`。`_loader_dev_shim.js` 是 LF，不混淆。
+
+9. **测试钩子模式 (`window._LOADER_TEST` + `__test__`)**：两个 loader 末尾的 `if (window._LOADER_TEST) { window._loader.__test__ = {…} }` 是单测专用反射出口。规则：
+   - 默认门控关闭（生产 `_LOADER_TEST` 未定义，整段不执行，0 副作用）
+   - 用 getter 暴露 IIFE 局部变量的当前值；用 setter 让测试替换可变绑定（如 `dynamicImport` 用 `vi.fn()` mock 后断言被调用的 URL）
+   - dev shim 里的 `dynamicImport` 已从 `use` 函数内提到 IIFE 顶层，**就是为了让 setter 能改到它**；后续重构若再次内联，记得同步改测试钩子
+
+10. **commit 拆分习惯**：用户偏好 per-substep commit。需要把混杂改动拆 commit 时，路径示例：
+    - 备份完整文件到 `/tmp`（注意 `/tmp` 跨 turn 可能被清掉，**不要依赖**，宁可在内存里记下要恢复的内容）
+    - 用 sed/awk 或 Edit 工具临时剥出某子集 → `git add` 子集 → commit
+    - 从备份恢复 → `git add -A` 剩下的 → commit
+
+11. **方案 C（手动 HTML 改动）的代价**：mock 项目可以接受。生产 PHP 项目接手后必须换成 closeBundle 或 manifest 渲染方案，不能保留方案 C；这是「mock 项目宽容化」的一次取舍，不要回流到迁移兼容性清单里推荐。
 
