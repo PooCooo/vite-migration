@@ -63,9 +63,9 @@
 
   <script>
     // 模拟 PHP 模板中的 _loader.add + _loader.use 调用
-    _loader.add('home-searchbox', '../resource/js/dist-vite/home/searchbox.js');
-    _loader.add('home-skin',      '../resource/js/dist-vite/home/skin.js');
-    _loader.add('home-ai',        '../resource/js/dist-vite/homeAI/homeAI.js');
+    _loader.add('home-searchbox', '<?php echo manifest_url('dev/home/searchbox/index.js'); ?>');
+    _loader.add('home-skin',      '<?php echo manifest_url('dev/home/skin/index.js'); ?>');
+    _loader.add('home-ai',        '<?php echo manifest_url('dev/homeAI/main.js'); ?>');
 
     _loader.use('home-searchbox', function() {
       console.log('[loader] home-searchbox loaded');

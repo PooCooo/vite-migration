@@ -12,7 +12,7 @@ mock-vite-migration/
   pages-php/                     # 真 PHP 模板：与 pages/ 一一对应，CSS link 由 PHP 实时注入
     home.php
     result.php
-  lib/manifest.php               # PHP 端 manifest 读取 + CSS link 渲染
+  lib/manifest.php               # PHP 端 manifest 读取：CSS link 渲染 + 业务 entry URL 查表
   pages-rendered/                # build 后由 mock 脚本生成，模拟 PHP 注入 CSS link（git ignored）
   dev/                           # Vite 源码入口
     home/searchbox/index.js
@@ -113,7 +113,7 @@ http://localhost:8000/pages-php/home.php?forceLegacy=1
 http://localhost:8000/pages-php/result.php
 ```
 
-依赖本地 PHP（macOS 可 `brew install php`）。该链路仅覆盖 CSS 注入 parity，业务 entry 仍写死路径——更深入的 manifest 查表见阶段三。
+依赖本地 PHP（macOS 可 `brew install php`）。该链路覆盖 CSS link 与业务 entry JS URL 的 manifest 查表（`manifest_url($entry)`）；hash 文件名、legacy entry/polyfills-legacy 经 manifest 解析仍属阶段三。
 
 ```bash
 npm run test:run
@@ -221,7 +221,7 @@ libNames -> 原 _loader
 - `_loader_res.js` 只管 JS 业务模块分流和全局库加载，不接管 CSS。
 - 全局库不进入 Vite 依赖图，除非有明确收益和兼容策略。
 
-mock 项目已新增真 PHP 链路（`pages-php/` + `lib/manifest.php`，`npm run serve:php`），当前仅覆盖 CSS 注入 parity，与 Node 版 `pages-rendered/` 输出对齐。`_loader.add` 查 manifest、hash 文件名、legacy entry 查表仍属阶段三。
+mock 项目已新增真 PHP 链路（`pages-php/` + `lib/manifest.php`，`npm run serve:php`）：CSS link 与 `_loader.add` 的业务 entry JS URL 均由 `manifest_url($entry)` 查表生成。剩余项：Vite 开启 hash 文件名、legacy entry 与 polyfills-legacy 经 manifest 解析。
 
 ## 维护注意事项
 

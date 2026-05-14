@@ -54,7 +54,7 @@
   <div id="result-ai-searchbox"></div>
 
   <script>
-    _loader.add('result-ai-searchbox', '../resource/js/dist-vite/result/ai-searchbox.js');
+    _loader.add('result-ai-searchbox', '<?php echo manifest_url('dev/result/ai-searchbox/index.js'); ?>');
 
     _loader.use('result-ai-searchbox', function() {
       console.log('[loader] result-ai-searchbox loaded');

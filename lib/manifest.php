@@ -2,6 +2,10 @@
 
 function read_manifest(): array
 {
+    static $cached = null;
+    if ($cached !== null) {
+        return $cached;
+    }
     $manifestPath = __DIR__ . '/../resource/js/dist-vite/.vite/manifest.json';
     $raw = @file_get_contents($manifestPath);
     if ($raw === false) {
@@ -15,7 +19,20 @@ function read_manifest(): array
             "Invalid Vite manifest at {$manifestPath}. Run npm run build:vite first."
         );
     }
-    return $data;
+    return $cached = $data;
+}
+
+function manifest_url(string $entry): string
+{
+    $manifest = read_manifest();
+    if (!isset($manifest[$entry])) {
+        throw new RuntimeException("Missing manifest entry: {$entry}");
+    }
+    $file = $manifest[$entry]['file'] ?? null;
+    if (!is_string($file) || $file === '') {
+        throw new RuntimeException("Manifest entry has no 'file' field: {$entry}");
+    }
+    return "../resource/js/dist-vite/{$file}";
 }
 
 function render_css_links(array $entries): string
