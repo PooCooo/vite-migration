@@ -9,6 +9,10 @@ mock-vite-migration/
   pages/                         # 模拟 PHP 模板的静态 HTML
     home.html
     result.html
+  pages-php/                     # 真 PHP 模板：与 pages/ 一一对应，CSS link 由 PHP 实时注入
+    home.php
+    result.php
+  lib/manifest.php               # PHP 端 manifest 读取 + CSS link 渲染
   pages-rendered/                # build 后由 mock 脚本生成，模拟 PHP 注入 CSS link（git ignored）
   dev/                           # Vite 源码入口
     home/searchbox/index.js
@@ -21,7 +25,7 @@ mock-vite-migration/
   resource/js/dist-vite/         # Vite 产物（git ignored）
   rollup/                        # 原 Rollup 构建配置，保留作基线对比
   tests/                         # Vitest + jsdom 单测
-  scripts/render-mock-pages.mjs  # mock PHP：读取 manifest 注入 CSS link
+  scripts/render-mock-pages.mjs  # Node mock：读取 manifest 写入 pages-rendered/*.html（与 PHP 链路并行的静态基线）
   MIGRATION_COMPATIBILITY_CHECKLIST.md
 ```
 
@@ -96,6 +100,20 @@ http://localhost:3000/pages-rendered/home.html
 http://localhost:3000/pages-rendered/home.html?forceLegacy=1
 http://localhost:3000/pages-rendered/result.html
 ```
+
+```bash
+npm run serve:php
+```
+
+启动 PHP 内置 server（`php -S localhost:8000`），由真 PHP 模板实时读取 manifest 注入 CSS link：
+
+```text
+http://localhost:8000/pages-php/home.php
+http://localhost:8000/pages-php/home.php?forceLegacy=1
+http://localhost:8000/pages-php/result.php
+```
+
+依赖本地 PHP（macOS 可 `brew install php`）。该链路仅覆盖 CSS 注入 parity，业务 entry 仍写死路径——更深入的 manifest 查表见阶段三。
 
 ```bash
 npm run test:run
@@ -202,6 +220,8 @@ libNames -> 原 _loader
 - PHP 根据 manifest 输出 CSS `<link>`，并去重。
 - `_loader_res.js` 只管 JS 业务模块分流和全局库加载，不接管 CSS。
 - 全局库不进入 Vite 依赖图，除非有明确收益和兼容策略。
+
+mock 项目已新增真 PHP 链路（`pages-php/` + `lib/manifest.php`，`npm run serve:php`），当前仅覆盖 CSS 注入 parity，与 Node 版 `pages-rendered/` 输出对齐。`_loader.add` 查 manifest、hash 文件名、legacy entry 查表仍属阶段三。
 
 ## 维护注意事项
 

@@ -10,6 +10,7 @@
     "build:vite": "vite build && node scripts/render-mock-pages.mjs",
     "render:mock-pages": "node scripts/render-mock-pages.mjs",
     "serve": "npx http-server . -p 3000 -c-1",
+    "serve:php": "php -S localhost:8000 -t .",
     "test": "vitest",
     "test:run": "vitest run"
   },

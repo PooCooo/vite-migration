@@ -1,0 +1,46 @@
+<?php
+
+function read_manifest(): array
+{
+    $manifestPath = __DIR__ . '/../resource/js/dist-vite/.vite/manifest.json';
+    $raw = @file_get_contents($manifestPath);
+    if ($raw === false) {
+        throw new RuntimeException(
+            "Cannot read Vite manifest at {$manifestPath}. Run npm run build:vite first."
+        );
+    }
+    $data = json_decode($raw, true);
+    if (!is_array($data)) {
+        throw new RuntimeException(
+            "Invalid Vite manifest at {$manifestPath}. Run npm run build:vite first."
+        );
+    }
+    return $data;
+}
+
+function render_css_links(array $entries): string
+{
+    $manifest = read_manifest();
+    $seen = [];
+    $cssFiles = [];
+
+    foreach ($entries as $entry) {
+        if (!isset($manifest[$entry])) {
+            throw new RuntimeException("Missing manifest entry: {$entry}");
+        }
+        $chunk = $manifest[$entry];
+        $cssList = $chunk['css'] ?? [];
+        foreach ($cssList as $cssFile) {
+            if (!isset($seen[$cssFile])) {
+                $seen[$cssFile] = true;
+                $cssFiles[] = $cssFile;
+            }
+        }
+    }
+
+    $lines = [];
+    foreach ($cssFiles as $cssFile) {
+        $lines[] = "  <link rel=\"stylesheet\" href=\"../resource/js/dist-vite/{$cssFile}\">";
+    }
+    return implode("\n", $lines);
+}
