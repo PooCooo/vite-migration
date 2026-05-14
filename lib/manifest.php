@@ -54,6 +54,24 @@ function polyfills_legacy_url(): string
     return "../resource/js/dist-vite/{$file}";
 }
 
+function is_dev(): bool
+{
+    return !empty(getenv('MOCK_DEV'));
+}
+
+function dev_origin(): string
+{
+    return 'http://localhost:5173';
+}
+
+function entry_url(string $entry, string $type = 'modern'): string
+{
+    if (is_dev()) {
+        return dev_origin() . '/' . $entry;
+    }
+    return manifest_url($entry, $type);
+}
+
 function render_css_links(array $entries): string
 {
     $manifest = read_manifest();

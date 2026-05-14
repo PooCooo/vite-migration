@@ -28,8 +28,8 @@
     };
   </script>
 
-
-<!-- 调试钩子：现代浏览器 ?forceLegacy=1 时同步注入 polyfills-legacy，强制走 legacy 分支 -->
+<?php if (!is_dev()): ?>
+  <!-- 调试钩子：现代浏览器 ?forceLegacy=1 时同步注入 polyfills-legacy，强制走 legacy 分支 -->
   <script>
     if (/[?&]forceLegacy=1\b/.test(location.search)) {
       document.write('<script src="<?php echo polyfills_legacy_url(); ?>"><\/script>');
@@ -38,16 +38,19 @@
 
   <!-- 静态加载：legacy 浏览器走 polyfills-legacy（含 SystemJS + core-js），现代浏览器自动忽略 nomodule -->
   <script nomodule src="<?php echo polyfills_legacy_url(); ?>"></script>
+<?php endif; ?>
 
   <!-- 静态加载：_loader_res（dev/prod 通用） -->
   <script src="../resource/js/common/_loader_res.js"></script>
 
-  <!-- Prod mock：PHP 根据 Vite manifest 注入 CSS link -->
+<?php if (is_dev()): ?>
+  <!-- Dev：接入 Vite HMR（双 server：PHP :8000 + Vite :5173） -->
+  <script type="module" src="<?php echo dev_origin(); ?>/@vite/client"></script>
+  <script src="<?php echo dev_origin(); ?>/resource/js/common/_loader_dev_shim.js"></script>
+<?php else: ?>
+  <!-- Prod：PHP 根据 Vite manifest 注入 CSS link -->
   <?php echo render_css_links(['dev/home/searchbox/index.js', 'dev/home/skin/index.js', 'dev/homeAI/main.js']); ?>
-
-
-  <!-- Dev-only：htmlInjector 在此注入 _loader_dev_shim；prod 下保持空 -->
-  <!--LOADER-->
+<?php endif; ?>
 </head>
 <body>
   <h1>Mock 首页（模拟 PHP 模板）</h1>
@@ -63,18 +66,24 @@
 
   <script>
     // 模拟 PHP 模板中的 _loader.add + _loader.use 调用
+<?php if (is_dev()): ?>
+    _loader.add('home-searchbox', '<?php echo entry_url('dev/home/searchbox/index.js'); ?>');
+    _loader.add('home-skin', '<?php echo entry_url('dev/home/skin/index.js'); ?>');
+    _loader.add('home-ai', '<?php echo entry_url('dev/homeAI/main.js'); ?>');
+<?php else: ?>
     _loader.add('home-searchbox', {
-      stc:    '<?php echo manifest_url('dev/home/searchbox/index.js'); ?>',
-      legacy: '<?php echo manifest_url('dev/home/searchbox/index.js', 'legacy'); ?>'
+      stc:    '<?php echo entry_url('dev/home/searchbox/index.js', 'modern'); ?>',
+      legacy: '<?php echo entry_url('dev/home/searchbox/index.js', 'legacy'); ?>'
     });
     _loader.add('home-skin', {
-      stc:    '<?php echo manifest_url('dev/home/skin/index.js'); ?>',
-      legacy: '<?php echo manifest_url('dev/home/skin/index.js', 'legacy'); ?>'
+      stc:    '<?php echo entry_url('dev/home/skin/index.js', 'modern'); ?>',
+      legacy: '<?php echo entry_url('dev/home/skin/index.js', 'legacy'); ?>'
     });
     _loader.add('home-ai', {
-      stc:    '<?php echo manifest_url('dev/homeAI/main.js'); ?>',
-      legacy: '<?php echo manifest_url('dev/homeAI/main.js', 'legacy'); ?>'
+      stc:    '<?php echo entry_url('dev/homeAI/main.js', 'modern'); ?>',
+      legacy: '<?php echo entry_url('dev/homeAI/main.js', 'legacy'); ?>'
     });
+<?php endif; ?>
 
     _loader.use('home-searchbox', function() {
       console.log('[loader] home-searchbox loaded');

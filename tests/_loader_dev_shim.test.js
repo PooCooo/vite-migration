@@ -41,6 +41,12 @@ describe('_loader_dev_shim.js', () => {
         .toBe('/dev/home/searchbox/index.js')
     })
 
+    it('已是 http://localhost:5173/dev/... 绝对 URL 原样写入 devUrlMap', () => {
+      window._loader.add('home-searchbox', 'http://localhost:5173/dev/home/searchbox/index.js')
+      expect(window._loader.__test_dev__.devUrlMap['home-searchbox'])
+        .toBe('http://localhost:5173/dev/home/searchbox/index.js')
+    })
+
     it('非业务 URL 不写入 devUrlMap，但 modules 表仍由原 add 注册', () => {
       window._loader.add('foo', 'https://cdn.example.com/foo.js')
       expect(window._loader.__test_dev__.devUrlMap['foo']).toBeUndefined()

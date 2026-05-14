@@ -9,6 +9,8 @@
 
   function distUrlToDevUrl(url) {
     if (!url) return null;
+    // PHP dev 模式下直接输出绝对 Vite URL，无需二次转换
+    if (/\/dev\/[^?#]+\.js(?:[?#]|$)/.test(url)) return url;
     // 匹配 resource/js/dist/<area>/<name>.js 或 resource/js/dist-vite/<area>/<name>.js（兼容相对/绝对路径）
     var m = url.match(/resource\/js\/dist(?:-vite)?\/([^\/]+)\/([^\/]+)\.js$/);
     if (!m) return null;

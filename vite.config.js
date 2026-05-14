@@ -47,6 +47,8 @@ export default defineConfig({
   root: '.',
   server: {
     port: 5173,
+    cors: true,
+    hmr: { host: 'localhost', port: 5173, protocol: 'ws' },
   },
   plugins: [
     vue(),

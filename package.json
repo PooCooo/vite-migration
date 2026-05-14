@@ -11,6 +11,7 @@
     "render:mock-pages": "node scripts/render-mock-pages.mjs",
     "serve": "npx http-server . -p 3000 -c-1",
     "serve:php": "php -S localhost:8000 -t .",
+    "serve:php-dev": "cross-env MOCK_DEV=1 php -S localhost:8000 -t .",
     "test": "vitest",
     "test:run": "vitest run"
   },
