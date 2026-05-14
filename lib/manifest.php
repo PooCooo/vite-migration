@@ -22,8 +22,13 @@ function read_manifest(): array
     return $cached = $data;
 }
 
-function manifest_url(string $entry): string
+function manifest_url(string $entry, string $type = 'modern'): string
 {
+    if ($type === 'legacy') {
+        // modern entry key  dev/home/searchbox/index.js
+        // legacy entry key  dev/home/searchbox/index-legacy.js
+        $entry = preg_replace('/\.js$/', '-legacy.js', $entry);
+    }
     $manifest = read_manifest();
     if (!isset($manifest[$entry])) {
         throw new RuntimeException("Missing manifest entry: {$entry}");
@@ -31,6 +36,20 @@ function manifest_url(string $entry): string
     $file = $manifest[$entry]['file'] ?? null;
     if (!is_string($file) || $file === '') {
         throw new RuntimeException("Manifest entry has no 'file' field: {$entry}");
+    }
+    return "../resource/js/dist-vite/{$file}";
+}
+
+function polyfills_legacy_url(): string
+{
+    $manifest = read_manifest();
+    $entry = 'vite/legacy-polyfills-legacy';
+    if (!isset($manifest[$entry])) {
+        throw new RuntimeException("Missing polyfills entry in manifest: {$entry}");
+    }
+    $file = $manifest[$entry]['file'] ?? null;
+    if (!is_string($file) || $file === '') {
+        throw new RuntimeException("Polyfills entry has no 'file' field: {$entry}");
     }
     return "../resource/js/dist-vite/{$file}";
 }

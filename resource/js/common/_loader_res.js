@@ -466,13 +466,24 @@
          * add a module
          */
         add: function(name, url, checker, attrs) {
-            // 兼容 url 为字符串或 { stc: '...' } 对象
-            var resolvedUrl = typeof url === 'string' ? url : (url && url.stc) || '';
-            if (resolvedUrl && BIZ_DIST_PATTERN.test(resolvedUrl)) {
+            // 第二参数支持：
+            //   string                       —— modern URL，legacy 字符串变换兜底（dev shim / Rollup 基线）
+            //   { stc: 'modern.js' }         —— modern only，legacy 字符串变换兜底
+            //   { stc: '...', legacy: '...' } —— 双 URL，manifest 查表注入（hash 文件名场景必需）
+            var modernUrl = '';
+            var legacyUrl = '';
+            if (typeof url === 'string') {
+                modernUrl = url;
+                legacyUrl = distUrlToLegacy(url);
+            } else if (url) {
+                modernUrl = url.stc || '';
+                legacyUrl = url.legacy || (modernUrl ? distUrlToLegacy(modernUrl) : '');
+            }
+            if (modernUrl && BIZ_DIST_PATTERN.test(modernUrl)) {
                 // 业务模块：登记 modern + legacy URL，由 use 时分流加载，不进 modules 表
                 bizModules[name] = {
-                    modernUrl: resolvedUrl,
-                    legacyUrl: distUrlToLegacy(resolvedUrl)
+                    modernUrl: modernUrl,
+                    legacyUrl: legacyUrl
                 };
                 return;
             }

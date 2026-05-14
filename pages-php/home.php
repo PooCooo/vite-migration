@@ -32,12 +32,12 @@
 <!-- 调试钩子：现代浏览器 ?forceLegacy=1 时同步注入 polyfills-legacy，强制走 legacy 分支 -->
   <script>
     if (/[?&]forceLegacy=1\b/.test(location.search)) {
-      document.write('<script src="../resource/js/dist-vite/polyfills-legacy.js"><\/script>');
+      document.write('<script src="<?php echo polyfills_legacy_url(); ?>"><\/script>');
     }
   </script>
 
   <!-- 静态加载：legacy 浏览器走 polyfills-legacy（含 SystemJS + core-js），现代浏览器自动忽略 nomodule -->
-  <script nomodule src="../resource/js/dist-vite/polyfills-legacy.js"></script>
+  <script nomodule src="<?php echo polyfills_legacy_url(); ?>"></script>
 
   <!-- 静态加载：_loader_res（dev/prod 通用） -->
   <script src="../resource/js/common/_loader_res.js"></script>
@@ -63,9 +63,18 @@
 
   <script>
     // 模拟 PHP 模板中的 _loader.add + _loader.use 调用
-    _loader.add('home-searchbox', '<?php echo manifest_url('dev/home/searchbox/index.js'); ?>');
-    _loader.add('home-skin',      '<?php echo manifest_url('dev/home/skin/index.js'); ?>');
-    _loader.add('home-ai',        '<?php echo manifest_url('dev/homeAI/main.js'); ?>');
+    _loader.add('home-searchbox', {
+      stc:    '<?php echo manifest_url('dev/home/searchbox/index.js'); ?>',
+      legacy: '<?php echo manifest_url('dev/home/searchbox/index.js', 'legacy'); ?>'
+    });
+    _loader.add('home-skin', {
+      stc:    '<?php echo manifest_url('dev/home/skin/index.js'); ?>',
+      legacy: '<?php echo manifest_url('dev/home/skin/index.js', 'legacy'); ?>'
+    });
+    _loader.add('home-ai', {
+      stc:    '<?php echo manifest_url('dev/homeAI/main.js'); ?>',
+      legacy: '<?php echo manifest_url('dev/homeAI/main.js', 'legacy'); ?>'
+    });
 
     _loader.use('home-searchbox', function() {
       console.log('[loader] home-searchbox loaded');

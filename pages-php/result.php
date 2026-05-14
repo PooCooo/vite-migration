@@ -30,12 +30,12 @@
   <!-- 调试钩子：现代浏览器 ?forceLegacy=1 时同步注入 polyfills-legacy，强制走 legacy 分支 -->
   <script>
     if (/[?&]forceLegacy=1\b/.test(location.search)) {
-      document.write('<script src="../resource/js/dist-vite/polyfills-legacy.js"><\/script>');
+      document.write('<script src="<?php echo polyfills_legacy_url(); ?>"><\/script>');
     }
   </script>
 
   <!-- 静态加载：legacy 浏览器走 polyfills-legacy（含 SystemJS + core-js），现代浏览器自动忽略 nomodule -->
-  <script nomodule src="../resource/js/dist-vite/polyfills-legacy.js"></script>
+  <script nomodule src="<?php echo polyfills_legacy_url(); ?>"></script>
 
   <!-- 静态加载：_loader_res（dev/prod 通用） -->
   <script src="../resource/js/common/_loader_res.js"></script>
@@ -54,7 +54,10 @@
   <div id="result-ai-searchbox"></div>
 
   <script>
-    _loader.add('result-ai-searchbox', '<?php echo manifest_url('dev/result/ai-searchbox/index.js'); ?>');
+    _loader.add('result-ai-searchbox', {
+      stc:    '<?php echo manifest_url('dev/result/ai-searchbox/index.js'); ?>',
+      legacy: '<?php echo manifest_url('dev/result/ai-searchbox/index.js', 'legacy'); ?>'
+    });
 
     _loader.use('result-ai-searchbox', function() {
       console.log('[loader] result-ai-searchbox loaded');

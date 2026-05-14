@@ -113,7 +113,7 @@ http://localhost:8000/pages-php/home.php?forceLegacy=1
 http://localhost:8000/pages-php/result.php
 ```
 
-依赖本地 PHP（macOS 可 `brew install php`）。该链路覆盖 CSS link 与业务 entry JS URL 的 manifest 查表（`manifest_url($entry)`）；hash 文件名、legacy entry/polyfills-legacy 经 manifest 解析仍属阶段三。
+依赖本地 PHP（macOS 可 `brew install php`）。该链路覆盖 CSS link、业务 entry modern/legacy 双 URL（`manifest_url($entry, 'modern'|'legacy')`）以及 polyfills-legacy（`polyfills_legacy_url()`）全经 manifest 查表，支持 hash 文件名。
 
 ```bash
 npm run test:run
@@ -194,21 +194,28 @@ libNames -> 原 _loader
 
 ### 5. plugin-legacy 与 manifest
 
-`@vitejs/plugin-legacy` 负责 legacy SystemJS 产物和 polyfills，但其 manifest 形态需要阶段三继续实测。
+`@vitejs/plugin-legacy` 负责 legacy SystemJS 产物和 polyfills，manifest 形态在 PHP 链路里已完整验证：
 
-阶段二只轻量验证了：
+- modern entry key：`dev/<area>/<name>/index.js`，`file` 为 modern 产物（含 hash）
+- legacy entry key：`dev/<area>/<name>/index-legacy.js`，`file` 为 legacy 产物（hash 独立）
+- polyfills key：`vite/legacy-polyfills-legacy`，`file` 为 `polyfills-legacy-<hash>.js`
+- modern entry 的 `css: [...]` 与 legacy 共用
 
-- modern entry 有 `css: [...]`
-- CSS 可由模板层输出 `<link>`
-- modern/legacy JS 可共用 CSS
+PHP 端用 `manifest_url($entry, 'legacy')` 把 modern entry key 自动映射到 legacy key 查表；`polyfills_legacy_url()` 单独查 polyfills 的 file 字段。
 
-阶段二没有做：
+### 6. legacy URL 派生：从字符串变换升级到 manifest 查表
 
-- 生产 hash manifest 查表
-- legacy/polyfills manifest 合并
-- `_loader.add(name, logicalEntry)` 查 manifest
+固定文件名阶段，`_loader_res.js` 的 `distUrlToLegacy()` 用 `.js → -legacy.js` 纯字符串变换派生 legacy URL（`home/searchbox.js → home/searchbox-legacy.js`）。
 
-这些已明确放到阶段三。
+hash 开启后这套必崩：
+
+- modern 产物：`home/searchbox-<hash1>.js`
+- legacy 产物：`home/searchbox-legacy-<hash2>.js`（plugin-legacy 内容不同，hash 必然独立）
+- 字符串变换会拼出 `home/searchbox-<hash1>-legacy.js`——**不存在**
+
+解决方式：`_loader.add` 第二参数支持对象 `{ stc, legacy }`，由 PHP 模板通过两次 `manifest_url` 查表注入。`distUrlToLegacy` 保留为字符串签名（dev shim / Rollup 基线）的兜底，对象签名下被显式 `legacy` 字段覆盖。
+
+阶段三规则：跨 modern/legacy 产物的 URL 关系不能假设是字符串变换；必须由 manifest 作为唯一来源。
 
 ## 阶段三交接要点
 
@@ -221,7 +228,7 @@ libNames -> 原 _loader
 - `_loader_res.js` 只管 JS 业务模块分流和全局库加载，不接管 CSS。
 - 全局库不进入 Vite 依赖图，除非有明确收益和兼容策略。
 
-mock 项目已新增真 PHP 链路（`pages-php/` + `lib/manifest.php`，`npm run serve:php`）：CSS link 与 `_loader.add` 的业务 entry JS URL 均由 `manifest_url($entry)` 查表生成。剩余项：Vite 开启 hash 文件名、legacy entry 与 polyfills-legacy 经 manifest 解析。
+mock 项目已新增真 PHP 链路（`pages-php/` + `lib/manifest.php`，`npm run serve:php`），覆盖：CSS link、业务 entry modern + legacy 双 URL（`manifest_url($entry, 'modern'|'legacy')`）、polyfills-legacy（`polyfills_legacy_url()`），全部经 manifest 查表，支持 hash 文件名（`entryFileNames: '[name]-[hash].js'`）。阶段三落地时这些函数可直接平移到真实 PHP 模板。
 
 ## 维护注意事项
 

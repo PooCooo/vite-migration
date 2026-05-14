@@ -94,6 +94,18 @@ describe('_loader_res.js', () => {
       expect(bizModules['home-searchbox'].legacyUrl)
         .toBe('/resource/js/dist-vite/home/searchbox-legacy.js')
     })
+
+    it('对象签名 { stc, legacy } 写入双 URL（不走字符串变换）', () => {
+      window._loader.add('home-searchbox', {
+        stc: '/resource/js/dist-vite/home/searchbox-abc.js',
+        legacy: '/resource/js/dist-vite/home/searchbox-legacy-def.js'
+      })
+      const { bizModules } = window._loader.__test__
+      expect(bizModules['home-searchbox']).toEqual({
+        modernUrl: '/resource/js/dist-vite/home/searchbox-abc.js',
+        legacyUrl: '/resource/js/dist-vite/home/searchbox-legacy-def.js'
+      })
+    })
   })
 
   describe('use - modern (supportsModule=true)', () => {
