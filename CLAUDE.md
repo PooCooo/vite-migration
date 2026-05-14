@@ -70,6 +70,37 @@ mock-vite-migration/
 - `668baef`、`93a43d6`：同步阶段进度文档。
 - `da5c0e3`、`40ba8dc`：阶段记录更新。
 
+## Docker 工作流（无需本机安装 PHP / Node）
+
+镜像真实项目的 `docker + make` 模式：PHP 和 Vite dev server 各跑一个容器，宿主机不需要安装 PHP。
+
+```bash
+make dev          # PHP (MOCK_DEV=1, :8000) + Vite dev server (:5173) 双容器并起
+make dev-build    # 同上，但先重新构建镜像（依赖变更后用）
+make build        # Vite 生产构建（产物写回宿主机 resource/js/dist-vite/）
+make test         # 运行单测（容器内 vitest run）
+make serve        # 生产预览：PHP 服务 prod 构建产物，无 MOCK_DEV（需先 make build）
+make down         # 停止 dev 容器
+make clean        # 清理容器 + 命名卷（重置 node_modules 时用）
+```
+
+首次启动会拉取 `php:8.2-cli` 镜像并构建 `Dockerfile.vite`（含 `npm install`），耗时约 1–2 分钟；后续启动直接复用。
+
+**Dev 访问入口**（`make dev` 后）：
+
+```text
+http://localhost:8000/pages-php/home.php    # PHP 模板 + Vite HMR
+http://localhost:8000/pages-php/result.php
+http://localhost:5173/pages/home.html       # 静态 HTML 直连 Vite（备用）
+```
+
+**关键设计**：
+
+- `node_modules` 装进 Docker 命名卷（`node_modules` volume），与宿主机隔离，避免 macOS/Linux 二进制冲突。
+- `vite.config.js` 加 `host: true`，Vite 在容器内绑定 `0.0.0.0:5173`；`hmr.host: 'localhost'` 保证浏览器 WebSocket 连到宿主机转发端口。
+- PHP 容器只读挂载（`:ro`），Vite 容器读写挂载（build 产物经 bind mount 写回宿主机）。
+- `make serve` 用 `docker run` 单次启动 prod PHP，不依赖 compose 服务，不带 `MOCK_DEV`。
+
 ## 当前可用命令
 
 ```bash

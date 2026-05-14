@@ -1,0 +1,5 @@
+node_modules
+resource/js/dist-vite
+resource/js/dist
+pages-rendered
+.git

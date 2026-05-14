@@ -1,0 +1,26 @@
+services:
+  php:
+    image: php:8.2-cli
+    working_dir: /app
+    volumes:
+      - .:/app:ro
+    ports:
+      - "8000:8000"
+    environment:
+      MOCK_DEV: "1"
+    command: php -S 0.0.0.0:8000 -t /app
+
+  vite:
+    build:
+      context: .
+      dockerfile: Dockerfile.vite
+    working_dir: /app
+    volumes:
+      - .:/app
+      - node_modules:/app/node_modules
+    ports:
+      - "5173:5173"
+    command: npx vite --host
+
+volumes:
+  node_modules:
