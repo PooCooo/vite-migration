@@ -230,6 +230,44 @@ hash 开启后这套必崩：
 
 mock 项目已新增真 PHP 链路（`pages-php/` + `lib/manifest.php`，`npm run serve:php`），覆盖：CSS link、业务 entry modern + legacy 双 URL（`manifest_url($entry, 'modern'|'legacy')`）、polyfills-legacy（`polyfills_legacy_url()`），全部经 manifest 查表，支持 hash 文件名（`entryFileNames: '[name]-[hash].js'`）。阶段三落地时这些函数可直接平移到真实 PHP 模板。
 
+## TODO：PHP 模板接入 Vite dev HMR
+
+当前 `pages-php/*.php` 在 `npm run serve:php` 下走 prod manifest，HMR 不工作；HMR 仅在 `npm run dev:vite` + `pages/*.html` 路径下可用。原项目落地后开发同学日常一定在真 PHP 模板上，HMR 必须跑通，否则 DX 退化。
+
+**目标形态**：PHP `:8000` 提供模板（不动），Vite `:5173` 提供 ESM + HMR；PHP 在 dev 模式（`MOCK_DEV=1` 环境变量）下注入 Vite client + dev shim，业务模块 URL 直接指向 `http://localhost:5173/dev/...`。Prod 模式（无 `MOCK_DEV`）行为完全不变。
+
+**改动清单**：
+
+| 路径 | 改动 |
+| --- | --- |
+| `lib/manifest.php` | 新增 `is_dev()` / `dev_origin()` / `entry_url($entry, $type)`；后者 dev 拼 Vite URL，prod 复用 `manifest_url` |
+| `pages-php/{home,result}.php` | head 注入 dev script 块（`@vite/client` + dev shim）包 `is_dev()`；polyfills / CSS / forceLegacy 三处包 `!is_dev()`；`_loader.add` 改用 `entry_url()` |
+| `resource/js/common/_loader_dev_shim.js` | `distUrlToDevUrl()` 前置"已是 dev URL 直接通过"分支（正则 `/\/dev\/[^?#]+\.js(?:[?#]|$)/`），老 dist 反推路径保留 |
+| `vite.config.js` | `server` 段加 `cors: true` + `hmr: { host: 'localhost', port: 5173, protocol: 'ws' }`（跨域 import + 显式 WebSocket 端点） |
+| `package.json` | 新增 `"serve:php-dev": "cross-env MOCK_DEV=1 php -S localhost:8000 -t ."` |
+| `tests/_loader_dev_shim.test.js` | 新增 1 个用例：`http://localhost:5173/dev/...` 形 URL 原样写入 `devUrlMap` |
+| `CLAUDE.md` | "当前可用命令"加 `serve:php-dev` + 双 server 工作方式；"维护注意事项"加 dev 必须 `MOCK_DEV=1` |
+
+**关键设计**：
+- PHP 在 dev 直接输出绝对 Vite URL，dev shim 不再二次转换 —— 避免 `/dev/...` 相对路径在 :8000 origin 下被解析到错误位置。
+- 老的 `pages/*.html` 直连 Vite 路径（dist URL 反推）保留，不破坏 `npm run dev:vite` 现有体验。
+- prod 链路（无 `MOCK_DEV`）零改动，可 `curl` 与本轮前 `pages-rendered/*.html` 做 diff 验证回归。
+
+**dev 工作流**：
+
+```bash
+# Terminal 1
+npm run dev:vite        # Vite at :5173
+# Terminal 2
+npm run serve:php-dev   # PHP at :8000，MOCK_DEV=1
+# 浏览器
+http://localhost:8000/pages-php/home.php
+```
+
+**验证项**：单测 25/25；prod curl diff 与本轮前一致；dev 浏览器手测：`@vite/client` 200、业务 entry 从 :5173 加载、`ws://localhost:5173/` open、修改 Vue SFC 浏览器无 reload 即更新。
+
+**Out of scope**：dev 模式 `?forceLegacy=1`（dev 无 legacy 产物）；`npm run dev` 自动并起两 server（concurrently 留给阶段三）；dev origin 配置化（mock 硬编码足够）；PHP 模板自身改动的 HMR（PHP 不在 Vite 监听范围）。
+
 ## 维护注意事项
 
 - `_loader_res.js` 是 CRLF 行尾；编辑时注意不要混入局部 LF。
