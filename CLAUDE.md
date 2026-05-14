@@ -29,7 +29,31 @@ mock-vite-migration/
 - 阶段二：引入 Vite + dev server + HMR
 - 阶段三（不在 mock 范围内）
 
+
 ---
+
+# 关键机制笔记（踩坑深度还原）
+
+## 1. 为什么用 `new Function('u','return import(u)')`？
+
+在 dev shim 里，为了避免 Vite 静态分析到 `import` 关键字从而强制给非 module 脚本注入 `/@vite/client` 导致 `SyntaxError`。
+- **为什么不用 `/* @vite-ignore */`？** 该注释只让 Vite 忽略解析路径参数，并不阻止 Vite 将文件标记为 ESM。
+- **为什么不把 shim 改成 `type="module"`？** module 是**隐式 defer** 的，会破坏原本 `_loader_res.js` 和业务 inline script 严格按顺序执行的时序，代价极大。
+- **为什么不用 Vite plugin 强行屏蔽？** 那会引入和 Vite/中间件顺序的强耦合（跨文件契约的"隐性丑"），而 `new Function` 是一行自包含的 JS 引擎规范级的 workaround（"显性丑"）。
+
+## 2. 动态 import 的 base URL 漂移坑
+
+`new Function` 带来了一个隐蔽坑：`import(u)` 解析相对路径时的 base URL，是**定义这个 Function 的脚本所在路径，而不是调用方的 `document.baseURI`**。
+在 `_loader_res.js` 里：
+- 函数定义在 `/resource/js/common/`
+- 如果传入相对路径 `../resource/js/dist-vite/home/x.js`
+- 浏览器会基于 `common/` 解析，得出 `/resource/js/resource/js/dist-vite/home/x.js`，多出一层目录，导致 404。
+
+**为什么 dev shim 没踩到坑？**
+纯属巧合。dev shim 里的正则映射总是返回**以 `/` 开头的绝对路径**（如 `/dev/home/...`）。绝对路径在解析时会忽略 base URL 的目录部分，直接挂在 origin 下，从而掩盖了 base 漂移问题。
+
+**解法**：送进动态 import 之前，统一用 `new URL(u, document.baseURI).href` 将 URL 强转为绝对 URL（`toAbsoluteUrl`），彻底消除歧义。给阶段三的教训：跨脚本传递 URL，如果中间夹了 eval/new Function/异步，**必须在源头归一化为绝对 URL**。
+
 
 # 阶段二：在 Mock 项目中引入 Vite
 
@@ -408,6 +432,34 @@ var libNames = list.filter(function (n) { return !devUrlMap[n]; }); // → origU
 - 现代浏览器享受 ESM + HMR + tree-shaking 全套
 - `_loader` 代码量大幅缩减（保留注册/去重/缓存能力，删除"模块依赖图"相关逻辑），迁移粒度可控
 
+
+## 阶段三落地方案：Manifest + PHP 风格 B
+
+Vite 构建（开启 `build.manifest: true` 且恢复 hash）后，产物路径无法硬编码。生产 PHP 渲染 HTML 的最佳实践是读取 `manifest.json`。
+
+**核心决策：采用风格 B（PHP 注入 Manifest + `_loader` 查表）**。
+
+```php
+<script>
+  window.__ASSET_MANIFEST__ = <?= json_encode($manifest) ?>;
+</script>
+<script src="_loader_res.js"></script>
+<script>
+  // 业务侧调用代码零改动！只传逻辑名
+  _loader.add('home-searchbox', 'home/searchbox');
+  _loader.use('home-searchbox', cb);
+</script>
+```
+
+**为什么选风格 B？**
+1. **HTML 模板与业务代码零侵入**：原有的上百个 `_loader.use` 回调模式完全不需要改写。
+2. 相比"PHP 直接渲染 `<script type=module>`"（风格 C），风格 B 风险最小，最适合平稳过渡，晚期再考虑切风格 C。
+3. **统一解决 CSS 加载**：Manifest 提供了入口对应的 `css: [...]` 字段，PHP 端在入口 script 渲染前统一渲染 `<link>`，不需要 `_loader` 自己发网络请求拉 CSS。
+
+**需要配合的改造（mock 需预演）**：
+1. plugin-legacy 产物（`*-legacy.js`、`polyfills-legacy.js`）默认可能不进标准 manifest。需写一个 `manifest-unify` 插件在 `closeBundle` 阶段将其合并进去。
+2. `_loader_res.js` 需改造：`add(name, ...)` 支持接收"逻辑名"，然后去 `window.__ASSET_MANIFEST__` 表里获取对应的 modernURL、legacyURL 等。
+
 ## 阶段三需要确认的事项
 
 - 原项目中 `_loader.add` / `_loader.use` 的调用统计：业务模块 vs 全局库的实际比例
@@ -521,13 +573,12 @@ var libNames = list.filter(function (n) { return !devUrlMap[n]; }); // → origU
 
 ### 1. CSS 处理（Step 6f）
 
-当前 `pages/*.html` 没有 `<link>` 标签引 CSS。业务 Vue 组件里 `import './style.css'` 在 dev 期由 vite 自动注入到 DOM，在 prod 期产物落到 `resource/js/dist-vite/assets/<name>-<hash>.css`，但 **没人加载它们**——modern ESM 入口本身不会自动拉 CSS asset，需要显式注入 `<link>`。
+当前 `pages/*.html` 没有 `<link>` 标签引 CSS。业务 Vue 组件里 `import './style.css'` 在 dev 期由 vite 自动注入到 DOM，在 prod 期产物落到 `resource/js/dist-vite/assets/<name>-<hash>.css`，但 **没人加载它们**。
 
-待办：
-
-- 决定加载方式：(a) 由 `_loader_res.js` 的 `add` 接收一份 css URL 后 `loadCss()` 注入；(b) Vite 生成 manifest.json，HTML 静态写 `<link>`；(c) Vite/plugin-legacy 自带的 CSS chunk 注入（需要研究当前 ESM + nomodule 双发场景下能否生效，以及与 `_loader` 体系如何协调）
-- 与原项目对齐：看原 `_loader.add(name, url, checker, attrs)` 的 `attrs` 中是否已有 css 字段，以及原 `loadCss()` 是怎么被调的
-- mock 项目验证：给 `Counter.vue` 加 scoped 样式，确认双发链路下 css 正确加载，modern 与 legacy 是否共用同一份 CSS（理论上同一份，因为 plugin-legacy 不会重复抽 CSS）
+待办（与 Manifest 方案合流）：
+- 开启 `build.manifest: true` 并恢复 `[hash]`。
+- 写一个 mock 脚本模拟 PHP，读取 manifest 里的 `css: [...]` 字段，静态渲染 `<link>` 标签。
+- mock 项目验证：给 `Counter.vue` 加 scoped 样式，确认双发链路下 css 正确加载，modern 与 legacy 是否共用同一份 CSS。
 
 ### 2. 迁移兼容性清单交付（Step 6g）
 
