@@ -440,20 +440,24 @@
         return url.replace(/\.js(\?.*)?$/, '-legacy.js$1');
     }
 
+    function toAbsoluteUrl(url) {
+        return new URL(url, document.baseURI).href;
+    }
+
     // 用 new Function 隐藏字面量 import，防止打包工具静态分析改写
     function dynamicImport(url) {
         // 显式转绝对 URL：new Function 内的 import() 的 base 是定义它的脚本 URL（_loader_res.js），
         // 不是 document.baseURI，相对路径会被错误地相对 /resource/js/common/ 解析
-        var abs = new URL(url, document.baseURI).href;
+        var abs = toAbsoluteUrl(url);
         return new Function('u', 'return import(u)')(abs);
     }
 
     function loadBizModule(name) {
         var cfg = bizModules[name];
         if (supportsModule) {
-            return dynamicImport(cfg.modernUrl);
+            return dynamicImport(toAbsoluteUrl(cfg.modernUrl));
         }
-        return window.System.import(cfg.legacyUrl);
+        return window.System.import(toAbsoluteUrl(cfg.legacyUrl));
     }
 
     /* interfaces */
@@ -716,6 +720,7 @@
             get modules() { return modules; },
             get supportsModule() { return supportsModule; },
             distUrlToLegacy: distUrlToLegacy,
+            toAbsoluteUrl: toAbsoluteUrl,
             BIZ_DIST_PATTERN: BIZ_DIST_PATTERN,
             get dynamicImport() { return dynamicImport; },
             set dynamicImport(v) { dynamicImport = v; }

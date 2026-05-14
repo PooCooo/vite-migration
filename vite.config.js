@@ -61,6 +61,7 @@ export default defineConfig({
   build: {
     outDir: 'resource/js/dist-vite',
     emptyOutDir: true,
+    manifest: true,
     rollupOptions: {
       input,
       output: {
