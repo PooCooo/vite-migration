@@ -440,24 +440,20 @@
         return url.replace(/\.js(\?.*)?$/, '-legacy.js$1');
     }
 
-    function toAbsoluteUrl(url) {
-        // SystemJS 相对路径解析与原生 import 不同，显式转绝对 URL
-        return new URL(url, document.baseURI).href;
-    }
-
     // 用 new Function 隐藏字面量 import，防止打包工具静态分析改写
     function dynamicImport(url) {
-        return new Function('u', 'return import(u)')(url);
+        // 显式转绝对 URL：new Function 内的 import() 的 base 是定义它的脚本 URL（_loader_res.js），
+        // 不是 document.baseURI，相对路径会被错误地相对 /resource/js/common/ 解析
+        var abs = new URL(url, document.baseURI).href;
+        return new Function('u', 'return import(u)')(abs);
     }
 
     function loadBizModule(name) {
         var cfg = bizModules[name];
-        // 显式转绝对 URL：new Function 内的 import() 的 base 是定义它的脚本 URL（_loader_res.js），
-        // 不是 document.baseURI，相对路径会被错误地相对 /resource/js/common/ 解析
         if (supportsModule) {
-            return dynamicImport(toAbsoluteUrl(cfg.modernUrl));
+            return dynamicImport(cfg.modernUrl);
         }
-        return window.System.import(toAbsoluteUrl(cfg.legacyUrl));
+        return window.System.import(cfg.legacyUrl);
     }
 
     /* interfaces */
