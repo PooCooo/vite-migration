@@ -36,7 +36,7 @@
 
 - 业务模块迁入 Vite：开发态走 Vite dev server + HMR，生产态走稳定文件名的 IIFE 产物 + STC 上传 CDN。
 - 全局库继续全局加载：jquery、require、solib-*、第三方 SDK 等不进入 Vite 业务依赖图。
-- `_loader` 收窄职责：保留全局库加载、去重、缓存、回调编排；业务模块加载新增 dist URL 识别 + 动态 `import()`。
+- `_loader` 收窄职责：保留全局库加载、去重、缓存、回调编排；路径 B 下业务 IIFE 仍按普通脚本模块加载，dev 环境再由 shim 转接 Vite 动态 `import()`。
 - PHP 模板**零侵入**：业务 `_loader.add('id', { stc: '...' }.stc)` 形态保持不变，STC 链路完全不动。
 
 ## 迁移路径决策
@@ -154,8 +154,8 @@ _loader.add('aitools_legacy',      { stc: '/resource/js/dist/home/aitools-legacy
 ## `_loader_res.js` 改造清单（路径 B）
 
 - 保留原默认全局库表和加载能力。
-- 业务模块识别：检测 `entry` 是否为 `/resource/js/dist/...` 形态的 dist URL（或 STC 改写后的 CDN URL），是则走 ESM 动态 `import()` 加载；否则走原全局库注册路径。
-- URL 进入 `dynamicImport` 前必须先 `toAbsoluteUrl(url) = new URL(url, document.baseURI).href`。
+- 业务模块 `/resource/js/dist/...`（或 STC 改写后的 CDN URL）按普通脚本模块注册到原 `modules` 表，由 `_loader.use('vue3.3.9,xxx')` 表达加载顺序。
+- 路径 B 不需要生产 `dynamicImport` / `System.import` 分流；动态 `import()` 只保留在 dev shim 中。
 - 测试钩子受 `window._LOADER_TEST` 门控，生产默认零副作用。
 - **路径 B 不需要 manifest 查表逻辑**；mock 中 `bizModules` 表 + manifest URL 解析的代码在阶段三可移除。
 

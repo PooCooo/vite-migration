@@ -6,13 +6,12 @@
 
 ---
 
-## 已验证的三条链路
+## 已验证的两条链路
 
 | 链路 | 入口 | 关键特性 |
 |---|---|---|
 | **Dev HMR** | `localhost:8000/pages-php/home.php` | PHP 注入 `@vite/client` + dev shim，修改 Vue SFC 无刷新更新 |
-| **Prod Modern** | `localhost:8000/pages-php/home.php`（build 后） | ESM + code-splitting，CSS 由 PHP 读 manifest 注入 |
-| **Prod Legacy** | 同上，加 `?forceLegacy=1` | SystemJS 产物，polyfills-legacy，兼容旧浏览器 |
+| **Prod STC-compatible** | `localhost:8000/pages-php/home.php`（build 后） | 无 hash IIFE，输出到 `resource/js/dist/`，模板保留 `{ stc: '/resource/...' }.stc` |
 
 ---
 
@@ -42,14 +41,8 @@ http://localhost:8000/pages-php/result.php
 ### Prod 模式
 
 ```bash
-make build    # 构建，产物写入 resource/js/dist-vite/
+make build    # 构建，产物写入 resource/js/dist/
 make serve    # 启动 PHP 服务 prod 产物（无 MOCK_DEV，:8000）
-```
-
-验证 Legacy 链路：
-
-```
-http://localhost:8000/pages-php/home.php?forceLegacy=1
 ```
 
 ### 运行单测
@@ -87,17 +80,16 @@ mock-vite-migration/
 │   └── result.php
 │
 ├── lib/
-│   └── manifest.php              # PHP 端工具函数：manifest 查表、dev/prod 分支
+│   └── manifest.php              # PHP 端 dev/prod 辅助函数（生产不读 manifest）
 │
 ├── resource/js/common/
-│   ├── _loader_res.js            # 改造后的 loader：modern/legacy 分流
+│   ├── _loader_res.js            # 原 loader 兼容层：全局库与 IIFE 业务脚本加载
 │   └── _loader_dev_shim.js      # Dev 专用：拦截 _loader.add/use，转接 Vite HMR
 │
-├── resource/js/dist-vite/        # Vite 构建产物（git ignored，make build 生成）
-├── pages-rendered/               # Node 脚本生成的静态基线（git ignored）
+├── resource/js/dist/             # STC 兼容 Vite 构建产物（git ignored，make build 生成）
 │
 ├── tests/                        # Vitest + jsdom 单测
-├── scripts/render-mock-pages.mjs # 读 manifest 生成 pages-rendered/*.html
+├── scripts/build-stc-vite.mjs    # 逐入口构建无 hash IIFE
 ├── rollup/                       # 原 Rollup 配置（保留作基线对比）
 │
 ├── Dockerfile.vite               # Vite/Node 容器镜像
@@ -111,9 +103,9 @@ mock-vite-migration/
 
 ## 架构概览
 
-### 为什么不继续打 IIFE？
+### 为什么生产继续打 IIFE？
 
-IIFE 方案最省力，但收益最低——没有 HMR、没有 tree-shaking、没有 code-splitting。这个 mock 直接验证**目标态**：业务模块进 Vite，全局库不动。
+原项目 STC 只可靠识别 PHP 模板里的 `/resource/...` 字面量，且 CDN 指纹和分片由 STC 负责。生产阶段先保持 Rollup 时代的 IIFE + 全局 Vue 形态，避免 Vite vendor chunk / manifest / hash 文件名和 STC 冲突；开发阶段仍通过 Vite dev server 获得 HMR。
 
 ### Dev 链路
 
@@ -133,24 +125,21 @@ PHP :8000 渲染 home.php
 
 ```
 PHP :8000 渲染 home.php（无 MOCK_DEV）
-  └─ 注入 polyfills-legacy.js（<script nomodule>）
   └─ 注入 _loader_res.js
-  └─ PHP 读 manifest → 注入 CSS <link>
-  └─ _loader.add('home-searchbox', { stc: '...modern-hash.js', legacy: '...legacy-hash.js' })
+  └─ _loader.add('home-searchbox', { stc: '/resource/js/dist/home/searchbox.js' }.stc)
+  └─ _loader.use('vue3.3.9,home-searchbox', cb)
 
 浏览器执行 _loader.use('home-searchbox', cb)
-  └─ _loader_res 检测 ES module 支持
-  └─ Modern: dynamicImport(stc URL)   → ESM 产物
-  └─ Legacy: System.import(legacy URL) → SystemJS 产物
+  └─ _loader_res 按原脚本 loader 语义加载全局 Vue 和业务 IIFE
 ```
 
 ### 关键分层原则
 
-业务模块（`dev/` 下）进入 Vite，享受 HMR / tree-shaking / code-splitting。全局库（jQuery、soLib、第三方 SDK 等）**不进 Vite**，继续由 `_loader` 或 `<script>` 管理，保持 `window.jQuery` 等运行时契约不变。
+业务模块（`dev/` 下）开发态进入 Vite，生产态由 Vite 逐入口构建成稳定文件名 IIFE。全局库（Vue、jQuery、soLib、第三方 SDK 等）**不进 Vite 业务依赖图**，继续由 `_loader` 或 `<script>` 管理，保持 `window.Vue`、`window.jQuery` 等运行时契约不变。
 
-### manifest 是 URL 的唯一来源
+### STC 是生产 URL 的唯一来源
 
-开启 hash 文件名后，modern 产物（`foo-<hash1>.js`）和 legacy 产物（`foo-legacy-<hash2>.js`）的 hash 独立，无法用字符串变换互相推导。PHP 模板通过两次 `manifest_url()` 查表分别获取两个 URL，注入 `_loader.add` 的 `{ stc, legacy }` 对象。
+生产不读 Vite manifest，不使用 Vite hash，不直接上传 CDN。模板中保留 `{ stc: '/resource/...' }.stc` 字面量，CDN 上传、指纹和路径重写全部交给 STC。
 
 ---
 

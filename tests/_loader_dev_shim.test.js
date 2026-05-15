@@ -88,11 +88,7 @@ describe('_loader_dev_shim.js', () => {
       expect(cb).toHaveBeenCalled()
     })
 
-    it('shim 完全覆盖原 use：_loader_res 的能力检测分支在 dev 不会触发', async () => {
-      // 同时为 _loader_res 的 dynamicImport 装 mock，验证它从未被调用
-      const mockResImport = vi.fn(() => Promise.resolve({}))
-      window._loader.__test__.dynamicImport = mockResImport
-
+    it('shim 完全覆盖原 use：业务模块不会交给原 loader 加载', async () => {
       window._loader.add('home-searchbox', '/resource/js/dist-vite/home/searchbox.js')
       const cb = vi.fn()
       window._loader.use('home-searchbox', cb)
@@ -100,9 +96,8 @@ describe('_loader_dev_shim.js', () => {
 
       // dev shim 的 import 被调用
       expect(mockDevImport).toHaveBeenCalled()
-      // _loader_res 的 import / System.import 都未被调用
-      expect(mockResImport).not.toHaveBeenCalled()
-      expect(window.System.import).not.toHaveBeenCalled()
+      // 原 loader 的 modules 表仍保留登记，但 use 被 shim 截获
+      expect(window._loader.__test__.modules['home-searchbox']).toBeDefined()
     })
   })
 })

@@ -27,18 +27,6 @@
     };
   </script>
 
-<?php if (!is_dev()): ?>
-  <!-- 调试钩子：现代浏览器 ?forceLegacy=1 时同步注入 polyfills-legacy，强制走 legacy 分支 -->
-  <script>
-    if (/[?&]forceLegacy=1\b/.test(location.search)) {
-      document.write('<script src="<?php echo polyfills_legacy_url(); ?>"><\/script>');
-    }
-  </script>
-
-  <!-- 静态加载：legacy 浏览器走 polyfills-legacy（含 SystemJS + core-js），现代浏览器自动忽略 nomodule -->
-  <script nomodule src="<?php echo polyfills_legacy_url(); ?>"></script>
-<?php endif; ?>
-
   <!-- 静态加载：_loader_res（dev/prod 通用） -->
   <script src="../resource/js/common/_loader_res.js"></script>
 
@@ -47,8 +35,7 @@
   <script type="module" src="<?php echo dev_origin(); ?>/@vite/client"></script>
   <script src="<?php echo dev_origin(); ?>/resource/js/common/_loader_dev_shim.js"></script>
 <?php else: ?>
-  <!-- Prod：PHP 根据 Vite manifest 注入 CSS link -->
-  <?php echo render_css_links(['dev/result/ai-searchbox/index.js']); ?>
+  <!-- Prod：当前 IIFE 构建把 Vue SFC CSS 注入 JS；若后续抽 CSS，必须写成 /resource/... 字面量交给 STC -->
 <?php endif; ?>
 </head>
 <body>
@@ -61,13 +48,10 @@
 <?php if (is_dev()): ?>
     _loader.add('result-ai-searchbox', '<?php echo entry_url('dev/result/ai-searchbox/index.js'); ?>');
 <?php else: ?>
-    _loader.add('result-ai-searchbox', {
-      stc:    '<?php echo entry_url('dev/result/ai-searchbox/index.js', 'modern'); ?>',
-      legacy: '<?php echo entry_url('dev/result/ai-searchbox/index.js', 'legacy'); ?>'
-    });
+    _loader.add('result-ai-searchbox', { stc: '/resource/js/dist/result/ai-searchbox.js' }.stc);
 <?php endif; ?>
 
-    _loader.use('result-ai-searchbox', function() {
+    _loader.use('vue3.3.9,result-ai-searchbox', function() {
       console.log('[loader] result-ai-searchbox loaded');
     });
   </script>

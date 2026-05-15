@@ -1,12 +1,11 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
-import legacy from '@vitejs/plugin-legacy'
 import { readdirSync, statSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 
-// _loader_res.js / polyfills-legacy.js 已在 HTML 中静态加载（pages/*.html）。
-// 此插件只负责在 dev 阶段额外注入 _loader_dev_shim.js；prod 下保持占位符为空。
+// _loader_res.js 已在 HTML 中静态加载（pages/*.html）。
+// 此配置主要服务 dev server；生产 STC 兼容构建见 scripts/build-stc-vite.mjs。
 function htmlInjector() {
   return {
     name: 'mock-html-injector',
@@ -53,23 +52,17 @@ export default defineConfig({
   },
   plugins: [
     vue(),
-    legacy({
-      targets: ['defaults', 'not IE 11'],
-      renderLegacyChunks: true,
-      polyfills: true,
-      modernPolyfills: false,
-    }),
     htmlInjector(),
   ],
   build: {
-    outDir: 'resource/js/dist-vite',
+    outDir: 'resource/js/dist',
     emptyOutDir: true,
-    manifest: true,
+    manifest: false,
     rollupOptions: {
       input,
       output: {
         entryFileNames: '[name].js',
-        chunkFileNames: 'vendor/[name].js',
+        chunkFileNames: '[name].js',
         assetFileNames: 'assets/[name][extname]',
       },
     },

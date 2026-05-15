@@ -27,22 +27,10 @@
     };
   </script>
 
-
-<!-- 调试钩子：现代浏览器 ?forceLegacy=1 时同步注入 polyfills-legacy，强制走 legacy 分支 -->
-  <script>
-    if (/[?&]forceLegacy=1\b/.test(location.search)) {
-      document.write('<script src="../resource/js/dist-vite/polyfills-legacy.js"><\/script>');
-    }
-  </script>
-
-  <!-- 静态加载：legacy 浏览器走 polyfills-legacy（含 SystemJS + core-js），现代浏览器自动忽略 nomodule -->
-  <script nomodule src="../resource/js/dist-vite/polyfills-legacy.js"></script>
-
   <!-- 静态加载：_loader_res（dev/prod 通用） -->
   <script src="../resource/js/common/_loader_res.js"></script>
 
-  <!-- Prod mock：scripts/render-mock-pages.mjs 根据 Vite manifest 注入 CSS link -->
-  <!--CSS_LINKS-->
+  <!-- Prod mock：当前 IIFE 构建把 Vue SFC CSS 注入 JS；若后续抽 CSS，必须写成 /resource/... 字面量交给 STC -->
 
   <!-- Dev-only：htmlInjector 在此注入 _loader_dev_shim；prod 下保持空 -->
   <!--LOADER-->
@@ -61,19 +49,19 @@
 
   <script>
     // 模拟 PHP 模板中的 _loader.add + _loader.use 调用
-    _loader.add('home-searchbox', '../resource/js/dist-vite/home/searchbox.js');
-    _loader.add('home-skin',      '../resource/js/dist-vite/home/skin.js');
-    _loader.add('home-ai',        '../resource/js/dist-vite/homeAI/homeAI.js');
+    _loader.add('home-searchbox', { stc: '/resource/js/dist/home/searchbox.js' }.stc);
+    _loader.add('home-skin',      { stc: '/resource/js/dist/home/skin.js' }.stc);
+    _loader.add('home-ai',        { stc: '/resource/js/dist/homeAI/homeAI.js' }.stc);
 
-    _loader.use('home-searchbox', function() {
+    _loader.use('vue3.3.9,home-searchbox', function() {
       console.log('[loader] home-searchbox loaded');
     });
 
-    _loader.use('home-skin', function() {
+    _loader.use('vue3.3.9,home-skin', function() {
       console.log('[loader] home-skin loaded');
     });
 
-    _loader.use('home-ai', function() {
+    _loader.use('vue3.3.9,home-ai', function() {
       console.log('[loader] home-ai loaded');
     });
   </script>

@@ -8,7 +8,7 @@ dev:
 dev-build:
 	docker compose up --build
 
-# Vite 生产构建（产物写回宿主机 resource/js/dist-vite/）
+# Vite 生产构建（STC 兼容产物写回宿主机 resource/js/dist/）
 build:
 	docker compose run --rm vite npm run build:vite
 

@@ -427,67 +427,12 @@
         }
     };
 
-    /* === 业务模块（Modern ESM / Legacy SystemJS 双发）=== */
-    // 调试用：URL 带 ?forceLegacy=1 时在 modern 浏览器中强制走 SystemJS 分支
-    var forceLegacy = typeof location !== 'undefined' && /[?&]forceLegacy=1\b/.test(location.search);
-    var supportsModule = !forceLegacy && ('noModule' in HTMLScriptElement.prototype);
-    var bizModules = {}; // name -> { modernUrl, legacyUrl }
-    // 业务入口识别（与 dev shim 反推规则一致）：兼容相对路径与绝对路径
-    var BIZ_DIST_PATTERN = /resource\/js\/dist(?:-vite)?\/[^\/]+\/[^\/]+\.js/;
-
-    function distUrlToLegacy(url) {
-        // /foo/bar.js → /foo/bar-legacy.js；保留 query 兜底：/foo/bar.js?t=1 → /foo/bar-legacy.js?t=1
-        return url.replace(/\.js(\?.*)?$/, '-legacy.js$1');
-    }
-
-    function toAbsoluteUrl(url) {
-        return new URL(url, document.baseURI).href;
-    }
-
-    // 用 new Function 隐藏字面量 import，防止打包工具静态分析改写
-    function dynamicImport(url) {
-        // 显式转绝对 URL：new Function 内的 import() 的 base 是定义它的脚本 URL（_loader_res.js），
-        // 不是 document.baseURI，相对路径会被错误地相对 /resource/js/common/ 解析
-        var abs = toAbsoluteUrl(url);
-        return new Function('u', 'return import(u)')(abs);
-    }
-
-    function loadBizModule(name) {
-        var cfg = bizModules[name];
-        if (supportsModule) {
-            return dynamicImport(toAbsoluteUrl(cfg.modernUrl));
-        }
-        return window.System.import(toAbsoluteUrl(cfg.legacyUrl));
-    }
-
     /* interfaces */
     window._loader = {
         /**
          * add a module
          */
         add: function(name, url, checker, attrs) {
-            // 第二参数支持：
-            //   string                       —— modern URL，legacy 字符串变换兜底（dev shim / Rollup 基线）
-            //   { stc: 'modern.js' }         —— modern only，legacy 字符串变换兜底
-            //   { stc: '...', legacy: '...' } —— 双 URL，manifest 查表注入（hash 文件名场景必需）
-            var modernUrl = '';
-            var legacyUrl = '';
-            if (typeof url === 'string') {
-                modernUrl = url;
-                legacyUrl = distUrlToLegacy(url);
-            } else if (url) {
-                modernUrl = url.stc || '';
-                legacyUrl = url.legacy || (modernUrl ? distUrlToLegacy(modernUrl) : '');
-            }
-            if (modernUrl && BIZ_DIST_PATTERN.test(modernUrl)) {
-                // 业务模块：登记 modern + legacy URL，由 use 时分流加载，不进 modules 表
-                bizModules[name] = {
-                    modernUrl: modernUrl,
-                    legacyUrl: legacyUrl
-                };
-                return;
-            }
-            // 非业务（全局库等）走原逻辑
             if (!modules[name]) {
                 modules[name] = {
                     url: url,
@@ -515,27 +460,8 @@
                 }
             })(names);
             OB.DomU.ready(function(){
-                // 分流：业务模块（ESM 双发）vs 全局库（原 _loader 加载）
-                var all = names.split(/\s*,\s*/g);
-                var bizNames = [];
-                var libNames = [];
-                for (var k = 0; k < all.length; k++) {
-                    if (bizModules[all[k]]) bizNames.push(all[k]);
-                    else libNames.push(all[k]);
-                }
-                function loadBiz() {
-                    return Promise.all(bizNames.map(loadBizModule));
-                }
-                // 全是业务模块：直接走 ESM 加载
-                if (bizNames.length && !libNames.length) {
-                    loadBiz().then(callback_wrap);
-                    return;
-                }
-                // 有库依赖：库加载完成后再加载业务（若存在）
-                var useCallback = bizNames.length
-                    ? function() { loadBiz().then(callback_wrap); }
-                    : callback_wrap;
-                names = libNames;
+                names = names.split(/\s*,\s*/g);
+                var useCallback = callback_wrap;
 
                 // 先剔除已加载且已执行的依赖，如jquery
                 for(var i = 0; i < names.length; i++) {
@@ -727,14 +653,7 @@
     // 测试钩子：仅在 window._LOADER_TEST 为 true 时曝露内部状态供 vitest 断言
     if (window._LOADER_TEST) {
         window._loader.__test__ = {
-            get bizModules() { return bizModules; },
-            get modules() { return modules; },
-            get supportsModule() { return supportsModule; },
-            distUrlToLegacy: distUrlToLegacy,
-            toAbsoluteUrl: toAbsoluteUrl,
-            BIZ_DIST_PATTERN: BIZ_DIST_PATTERN,
-            get dynamicImport() { return dynamicImport; },
-            set dynamicImport(v) { dynamicImport = v; }
+            get modules() { return modules; }
         };
     }
 })(window);

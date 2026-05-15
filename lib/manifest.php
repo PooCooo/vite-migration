@@ -1,59 +1,5 @@
 <?php
 
-function read_manifest(): array
-{
-    static $cached = null;
-    if ($cached !== null) {
-        return $cached;
-    }
-    $manifestPath = __DIR__ . '/../resource/js/dist-vite/.vite/manifest.json';
-    $raw = @file_get_contents($manifestPath);
-    if ($raw === false) {
-        throw new RuntimeException(
-            "Cannot read Vite manifest at {$manifestPath}. Run npm run build:vite first."
-        );
-    }
-    $data = json_decode($raw, true);
-    if (!is_array($data)) {
-        throw new RuntimeException(
-            "Invalid Vite manifest at {$manifestPath}. Run npm run build:vite first."
-        );
-    }
-    return $cached = $data;
-}
-
-function manifest_url(string $entry, string $type = 'modern'): string
-{
-    if ($type === 'legacy') {
-        // modern entry key  dev/home/searchbox/index.js
-        // legacy entry key  dev/home/searchbox/index-legacy.js
-        $entry = preg_replace('/\.js$/', '-legacy.js', $entry);
-    }
-    $manifest = read_manifest();
-    if (!isset($manifest[$entry])) {
-        throw new RuntimeException("Missing manifest entry: {$entry}");
-    }
-    $file = $manifest[$entry]['file'] ?? null;
-    if (!is_string($file) || $file === '') {
-        throw new RuntimeException("Manifest entry has no 'file' field: {$entry}");
-    }
-    return "../resource/js/dist-vite/{$file}";
-}
-
-function polyfills_legacy_url(): string
-{
-    $manifest = read_manifest();
-    $entry = 'vite/legacy-polyfills-legacy';
-    if (!isset($manifest[$entry])) {
-        throw new RuntimeException("Missing polyfills entry in manifest: {$entry}");
-    }
-    $file = $manifest[$entry]['file'] ?? null;
-    if (!is_string($file) || $file === '') {
-        throw new RuntimeException("Polyfills entry has no 'file' field: {$entry}");
-    }
-    return "../resource/js/dist-vite/{$file}";
-}
-
 function is_dev(): bool
 {
     return !empty(getenv('MOCK_DEV'));
@@ -69,32 +15,19 @@ function entry_url(string $entry, string $type = 'modern'): string
     if (is_dev()) {
         return dev_origin() . '/' . $entry;
     }
-    return manifest_url($entry, $type);
+    return '/resource/js/dist/' . prod_entry_file($entry);
 }
 
-function render_css_links(array $entries): string
+function prod_entry_file(string $entry): string
 {
-    $manifest = read_manifest();
-    $seen = [];
-    $cssFiles = [];
-
-    foreach ($entries as $entry) {
-        if (!isset($manifest[$entry])) {
-            throw new RuntimeException("Missing manifest entry: {$entry}");
-        }
-        $chunk = $manifest[$entry];
-        $cssList = $chunk['css'] ?? [];
-        foreach ($cssList as $cssFile) {
-            if (!isset($seen[$cssFile])) {
-                $seen[$cssFile] = true;
-                $cssFiles[] = $cssFile;
-            }
-        }
+    $map = [
+        'dev/home/searchbox/index.js' => 'home/searchbox.js',
+        'dev/home/skin/index.js' => 'home/skin.js',
+        'dev/result/ai-searchbox/index.js' => 'result/ai-searchbox.js',
+        'dev/homeAI/main.js' => 'homeAI/homeAI.js',
+    ];
+    if (!isset($map[$entry])) {
+        throw new RuntimeException("Missing prod entry mapping: {$entry}");
     }
-
-    $lines = [];
-    foreach ($cssFiles as $cssFile) {
-        $lines[] = "  <link rel=\"stylesheet\" href=\"../resource/js/dist-vite/{$cssFile}\">";
-    }
-    return implode("\n", $lines);
+    return $map[$entry];
 }
