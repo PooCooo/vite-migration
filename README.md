@@ -51,6 +51,14 @@ make serve    # 启动 PHP 服务 prod 产物（无 MOCK_DEV，:8000）
 make test     # 25 个用例，覆盖 _loader_res / _loader_dev_shim 核心分流逻辑
 ```
 
+### 检查 STC 兼容性
+
+```bash
+npm run check:stc
+```
+
+该检查会确认生产构建没有 `vendor/`、manifest、inline CSS 注入或 `dist-vite` 回退，并确认 PHP/HTML 模板仍保留 `/resource/...` 字面量。
+
 ### 其他命令
 
 ```bash

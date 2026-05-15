@@ -8,6 +8,7 @@
     "dev:vite": "vite",
     "build": "cross-env NODE_ENV=production npx rollup --config ./rollup/rollup.config.prod.mjs",
     "build:vite": "node scripts/build-stc-vite.mjs",
+    "check:stc": "node scripts/check-stc-build.mjs",
     "serve": "npx http-server . -p 3000 -c-1",
     "serve:php": "php -S localhost:8000 -t .",
     "serve:php-dev": "cross-env MOCK_DEV=1 php -S localhost:8000 -t .",
