@@ -264,18 +264,194 @@ hash 开启后这套必崩：
 
 阶段三规则：跨 modern/legacy 产物的 URL 关系不能假设是字符串变换；必须由 manifest 作为唯一来源。
 
-## 阶段三交接要点
+## STC 燕尾服编译兼容性（2026-05-15 在原项目验证）
 
-阶段三建议以 `MIGRATION_COMPATIBILITY_CHECKLIST.md` 为准。核心方向：
+阶段二 mock 推荐的"PHP 注入 manifest + `_loader` 查表"方案与原项目 STC（燕尾服）编译链路冲突。在原项目跑 7 组手动实验 + mock 关 hash 重 build 1 组后，STC 的工作规则和它对 vite 产物形态的约束已经明确。本节与 `阶段二目标与最终方案` / `阶段三交接要点` 章节冲突时**以本节为准**——后两者基于已被推翻的 manifest 方案，TODO 重写。
 
-- 生产恢复 hash 文件名，以 manifest 作为 URL 唯一来源。
-- PHP 注入统一 manifest。
-- `_loader.add(name, logicalEntry)` 支持逻辑入口查表。
-- PHP 根据 manifest 输出 CSS `<link>`，并去重。
-- `_loader_res.js` 只管 JS 业务模块分流和全局库加载，不接管 CSS。
-- 全局库不进入 Vite 依赖图，除非有明确收益和兼容策略。
+背景文档：`docs/stc-cdn-compile.md`（原项目侧）。
 
-mock 项目已新增真 PHP 链路（`pages-php/` + `lib/manifest.php`，`make dev` / `make serve`），覆盖：CSS link、业务 entry modern + legacy 双 URL（`manifest_url($entry, 'modern'|'legacy')`）、polyfills-legacy（`polyfills_legacy_url()`），全部经 manifest 查表，支持 hash 文件名（`entryFileNames: '[name]-[hash].js'`）。阶段三落地时这些函数可直接平移到真实 PHP 模板。
+### STC 字面量识别规则
+
+STC 是 PHP 源码层面的静态扫描，认死板字面量；扫描对象是 `application/views/` 下的 `.php` 源文件，**不是** PHP 运行时输出。
+
+| 写法 | 是否被替换 | 说明 |
+| --- | --- | --- |
+| `_loader.add('id', { stc: '/resource/...' }.stc)` | ✅ | 唯一被识别的 `_loader.add` 形态（round 1） |
+| `_loader.add('id', { stc: '...', legacy: '...' }.stc)` | ❌ | 多键对象不识别（round 2） |
+| `_loader.add('id', { stc: '...', legacy: '...' })` | ❌ | 缺 `.stc` 取值后缀（round 3） |
+| `_loader.add('id', '/resource/...')` | ❌ | 裸字符串字面量不识别（round 4） |
+| 多次 `_loader.add` 各带 `{ stc: ... }.stc` | ✅ | 每条独立替换（round 5） |
+| `_loader.add('id', pickUrl({stc:'A'}.stc, {stc:'B'}.stc))` | ✅ | 函数参数嵌套也识别，A/B 各自被替换为独立 CDN URL（round 9） |
+| `<link href="/resource/.../x.css" rel="stylesheet">` | ✅ | 替换为 CDN URL（round 7） |
+| `<link ... rel="stylesheet" inline>` | ✅ 内联 | 转为 `<style>` 内联（round 6） |
+
+### CDN 指纹策略
+
+- STC 给**每个文件**独立指纹（`/ssl/<hash>/...`）和分片域名（`ss1..ss5.360tres.com`）。
+- 同一目录下 `foo.js` 和 `foo-legacy.js` 的 hash 和分片号都不同（round 5 同时验证两个 entry，hash 和 ssN 都不一样）。
+- **不能用字符串变换**（`.js → -legacy.js`）从 modern URL 派生 legacy URL——结果 host/hash 全错。
+
+### Vite 产物形态（关 hash 后的观察）
+
+`vite.config.js` 把 `entryFileNames` 改为 `'[name].js'` 后 build 产物（节选）：
+
+```text
+resource/js/dist-vite/home/searchbox.js                          1.01 kB
+resource/js/dist-vite/home/searchbox-legacy.js                   1.26 kB
+resource/js/dist-vite/polyfills-legacy.js                       40.58 kB
+resource/js/dist-vite/vendor/runtime-dom.esm-bundler.js         61.36 kB  ← 见 TODO 1
+resource/js/dist-vite/vendor/runtime-dom.esm-bundler-legacy.js
+resource/js/dist-vite/assets/searchbox-.css                      0.27 kB  ← 末尾 - 是配置问题
+```
+
+- 业务 entry / legacy entry / polyfills 命名稳定，符合 STC 字面量匹配前提。
+- CSS 末尾 `-` 是 `assetFileNames` 删 `[hash]` 时没删干净，改 `'assets/[name].[ext]'` 即可。
+- vendor chunk 是 vite 抽出来的 shared 文件，业务 entry 内部以 ESM 静态 `import "../vendor/..."` 引用——见 TODO 1。
+
+### 由此推出的硬约束
+
+- **PHP 模板必须直接写字面量** `{ stc: '/resource/...' }.stc`；不能通过 PHP 函数（`manifest_url()` 等）或运行时拼接生成。
+- **STC 识别是位置无关的 lexical scanning**：`{ stc: '...' }.stc` 出现在任意 JS 表达式位置（直接作为参数、函数参数嵌套、独立语句等）都会被替换（round 1/5/9 共同证实）。允许用 helper 函数包装多个字面量做 modern/legacy 选择。
+- **Vite 产物必须无 hash**（`entryFileNames: '[name].js'`、`assetFileNames: 'assets/[name].[ext]'`）——指纹归 STC 管。
+- **运行时不能从 modern URL 推导 legacy URL**——modern 和 legacy 必须各自以字面量出现在某个 `.php` 源文件里，让 STC 各自处理。
+- **CSS 不需要 manifest**——`<link href="/resource/...">` 是 STC 原生支持形态，直接写即可。
+
+### TODO（未解难点）
+
+#### TODO 1：vendor chunk 在 STC 链路下不可用 — 待 mock 修复
+
+业务 entry 内部 ESM 静态 import 引用 vendor：
+
+```text
+searchbox.js 内含 import "../vendor/runtime-dom.esm-bundler.js"
+↓ STC 各自上传
+ss5/ssl/A/dist/home/searchbox.js
+ss4/ssl/B/dist/vendor/runtime-dom.esm-bundler.js
+↓ 浏览器加载 searchbox.js 后解析相对 import
+ss5/ssl/A/dist/vendor/runtime-dom.esm-bundler.js  ← 不存在该 hash/分片，404
+```
+
+阶段二里"Vue 纳入 Vite 依赖图、抽 shared vendor chunk"是基于 manifest 方案的，已不成立。**修复方向**：mock `vite.config.js` 加 `external: ['vue']` + `output.format: 'iife'`，回到原项目 `window.Vue` + 自包含 entry 形态。验证目标：产物只剩业务 entry + CSS（+ 可选 polyfills），**没有 `vendor/` 目录**。
+
+#### TODO 2：modern/legacy 双发的模板形态 — 待决策
+
+STC 不识别 `{ stc, legacy }` 多键对象（round 2/3 证实），mock 现在 `_loader.add('id', { stc: ..., legacy: ... })` 在原项目走不通。四条候选：
+
+- **路径 D（round 9 验证，保留双发时的最优解）**：业务模板单 `_loader.add` + helper 函数包装两个字面量：
+
+  ```php
+  _loader.add('searchbox_ai', pickUrl(
+    { stc: '/resource/js/dist/home/ai-searchbox.js' }.stc,
+    { stc: '/resource/js/dist/home/ai-searchbox-legacy.js' }.stc
+  ));
+  ```
+
+  `pickUrl(modern, legacy)` 由 `_loader_res.js` 提供，按浏览器能力返回二选一。STC 把两个字面量各自替换为独立 CDN URL（不同 hash、不同 ssN 分片都没关系，pickUrl 拿到的是完整 URL）。单 `_loader.add` 形态保留、零命名约定、双发收益保留。设计未决见 TODO 8。
+- **路径 A**：业务模板每模块写两条 `_loader.add`（modern + legacy），`_loader_res.js` 用命名约定（`name` ↔ `name_legacy`）分流。相对 D 多一行模板代码并引入命名约定，劣势明显。
+- **路径 B（最稳，零模板改动）**：放弃 modern/legacy 双发，回到原项目"单产物 + 聚合 polyfill"，vite `target` 调到原项目支持的最低浏览器，不接 `@vitejs/plugin-legacy`，PHP 模板一个字符不动。
+- **路径 C**：业务模板单 `_loader.add`，build 期生成集中 `_legacy_registry.php` 字面量片段，STC 一并扫描。比 D 多一个 build 步骤，业务模板完全冻结时可选。
+
+决策依赖：是否要双发（产品决策）、plugin-legacy 在 IIFE+external 下的可用性（见 TODO 3）、`pickUrl()` 设计（见 TODO 8）。
+
+#### TODO 3：plugin-legacy 与 IIFE+external 的兼容性 — 待实测
+
+`@vitejs/plugin-legacy` 默认产 SystemJS 格式 + 带 polyfills。如果走路径 A/C，同时要求：
+
+- `external: ['vue']` + `format: 'iife'`（解决 vendor chunk 问题）
+- legacy 文件名无 hash
+- legacy entry 自包含（无内部 import）
+
+需要在 mock 上跑通才能确认 A/C 可行。
+
+#### TODO 4：polyfill 聚合方案在 vite 下的等价实现 — 待实现
+
+原项目 `scripts/rollup-plugin-polyfills.js` 把每业务模块所需 polyfill 集中到 `polyfill_home.min.js` / `polyfill_result.min.js`。vite 没有等价机制。路径 B 落地前需要实现等价 vite 插件，否则每业务自带 polyfill 会重复执行 + 包体膨胀。
+
+#### TODO 5：STC 是否扫描 .js 文件内部 `/resource/...` 引用 — 待实测
+
+`MOD_JS_TPL_REPLACE = true` 暗示 STC 可能也扫 JS，但具体行为未实测。即便扫了，跨文件相对 import 在每文件独立 hash 下仍然无解（见 TODO 1）。本项主要是**确认认知**，不期待解出 vendor chunk 问题。
+
+#### TODO 6：vite build 在 CentOS 7.4 老镜像里的可运行性 — 待实测
+
+原项目 `fe-build` 在 `r.so.qihoo.net/library/centos:7.4.1708` 跑 `yarn build`。该镜像默认 Node 较老，esbuild 原生二进制可能不兼容。如果需要升级镜像，连带改 `Makefile` / `build/build_node.sh`。
+
+#### TODO 7：vite CSS 产物落点与原项目模板对齐 — 待确认
+
+vite 自动生成 CSS（`assets/searchbox.css` 等），落点和命名要与原项目 `<link>` 引用形态对齐。原项目是否已有 Vue SFC 等价模式触发 CSS 产物？多页面共享同一 CSS 时 PHP 模板如何避免重复 `<link>`（STC 是否去重未知）。
+
+#### TODO 8：`pickUrl()` 的归属与浏览器能力检测策略 — 待设计
+
+若走路径 D，需要决定：
+
+- 实现位置：放 `_loader_res.js` 还是独立 `_browser_caps.js`？
+- 现代能力判定用 `'noModule' in HTMLScriptElement.prototype`（plugin-legacy 默认逻辑）、`typeof Symbol === 'function'`、还是其它？需要与原项目 `_loader.use('vue3.3.9,...')` 现有的能力假设对齐，避免业务模块和 vue 走不同分支导致 API 不匹配。
+- `?forceLegacy=1` 调试开关是否上生产？mock 阶段保留，生产需团队评审。
+- CSP 策略下需要确认 `script-src` 允许全部 `*.360tres.com` 分片域名——modern 和 legacy 文件可能来自不同 `ssN` 子域。
+- `pickUrl` 调用本身不含 eval/Function 构造，但确认现行 CSP `script-src` 不会因为运行时函数调用拦截 URL。
+
+## 阶段三核心方向
+
+阶段二 mock 中的"manifest 驱动 PHP 渲染"方案已被 STC 实验推翻（见上方 `STC 燕尾服编译兼容性`）。阶段三在原项目落地的核心方向以 STC 硬约束为基础重新整理如下。`MIGRATION_COMPATIBILITY_CHECKLIST.md` 同步待按本节重写。
+
+### Vite 配置必备
+
+- 产物无 hash：`entryFileNames: '[name].js'`、`chunkFileNames: '[name].js'`、`assetFileNames: 'assets/[name].[ext]'`。指纹归 STC。
+- Vue 走 external + 全局：`external: ['vue']`、`output.format: 'iife'`、`output.globals: { vue: 'Vue' }`。规避 vendor chunk 内部相对 import 在 STC CDN 上 404（TODO 1）。
+- `build.target` 显式对齐原项目最低浏览器（rollup 现状 `targets: { ie: 10 }`）。
+- 入口扫描保留 rollup 同形态，输出路径与文件名与 rollup 1:1 对齐（`docs/stc-cdn-compile.md` §6.1）。
+- `@vitejs/plugin-vue` 接入；`@vitejs/plugin-legacy` 是否接入取决于双发路径决策（TODO 2 / 3）。
+
+### PHP 模板形态
+
+- 业务模块唯一被 STC 识别的字面量形态：
+
+  ```php
+  _loader.add('xxx', { stc: '/resource/js/dist/xxx.js' }.stc);
+  ```
+
+  多键对象、缺 `.stc` 后缀、裸字符串都不行。
+- CSS：标准 `<link href="/resource/...">`；小文件加 `inline` 触发内联。
+- **禁止**在模板里用 PHP 函数（`manifest_url()` 等）生成 `/resource/...` 路径——STC 看不见运行时输出。
+- 业务模板的 `_loader.add` / `_loader.use` 形态尽量不动。modern/legacy 双发的具体表达（双 `_loader.add` / `pickUrl` 包装 / 集中 registry）取决于 TODO 2 决策。
+
+### `_loader_res.js` 改造
+
+- 业务模块识别：第二参数命中 `/resource/js/dist/...`（或 STC 改写后的 CDN URL）走动态 `import()`；否则走原全局库注册。
+- URL 进 `dynamicImport` / `System.import` 前先 `toAbsoluteUrl(url) = new URL(url, document.baseURI).href`，避免 `new Function` base 漂移。
+- 不接管 CSS。
+- 测试钩子受 `window._LOADER_TEST` 门控，生产零副作用。
+- mock 的 `bizModules` 表 + `_loader.add(name, logicalEntry)` 逻辑入口形态**不保留**——STC 模型下 URL 即字面量，不需要查表。
+
+### 全局库
+
+- jquery、require、solib-\*、广告 / 监控 SDK 维持现状：`<script>` 或瘦身 `_loader` 加载，挂 `window`。
+- 不进 Vite 依赖图。
+- 阶段三启动前静态扫 `application/views/**/*.php` 的 `_loader.add` / `_loader.use`，区分业务模块和全局库。
+
+### Polyfill
+
+- 沿用原项目 `polyfill_home.min.js` / `polyfill_result.min.js` 命名与聚合模型（按业务阵营共享一份 polyfill bundle）。
+- vite 端等价实现待落地（TODO 4）。
+- 禁止"每业务模块自带 polyfill"——重复执行 + 包体膨胀。
+
+### 阶段三启动前必须确认
+
+- 业务入口清单和目录命名能稳定映射到 vite input key（rollup 现状是 `readdirSync` 动态枚举，应能直接平移）。
+- 全局库清单，覆盖除 jquery、require、solib-\* 外的所有 SDK。
+- vite 在 `r.so.qihoo.net/library/centos:7.4.1708` 镜像可运行（TODO 6）。
+- modern / legacy 双发是否保留 → 路径 A / B / C 决策（TODO 2 / 3）。
+- vendor chunk + 相对 import 在 STC 后真的 404 的推断需在原项目实测确认（TODO 1 / 5）。
+- CSP `script-src` 兼容 STC 分片域名（应已兼容，rollup 状态在线）。
+- vite CSS 产物落点和模板 `<link>` 引用形态对齐（TODO 7）。
+
+### mock 不带到原项目的清单
+
+- vite hash 文件名
+- Vue 入 vite 依赖图 / vendor chunk
+- `manifest_url()` PHP 运行时查表
+- `_loader.add(name, logicalEntry)` 逻辑入口形态
+- `pages-rendered/*.html` 静态基线（mock 验证用）
+- `?forceLegacy=1` 是否上生产，待 TODO 2 一并决定
 
 ## PHP 模板接入 Vite dev HMR（已完成）
 
