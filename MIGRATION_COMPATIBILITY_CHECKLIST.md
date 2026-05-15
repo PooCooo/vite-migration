@@ -192,7 +192,7 @@ _loader.add('aitools_legacy',      { stc: '/resource/js/dist/home/aitools-legacy
 
 - CSS 直接走 `<link href="/resource/css/..." rel="stylesheet">` 字面量，STC 自动上传 CDN 并改写 URL。
 - 小文件可加 `inline` 属性，STC 编译时内联成 `<style>`。
-- vite 产物 CSS 路径与文件名只需稳定无 hash：`assetFileNames: 'assets/[name].[ext]'`。注意从带 hash 模板删 `[hash]` 时同步删 `-`，否则产出 `foo-.css`（mock 实测发现）。具体落点在 `resource/js/dist/assets/...` 或 `resource/css/...` 都可，整个 `resource/` 都是 STC 的 `STATIC_PATH`。
+- vite 产物 CSS 路径与文件名只需稳定无 hash：mock 已验证 IIFE CSS 可后处理抽离为 `resource/js/dist/assets/*.css`，模板用 `<link href="/resource/js/dist/assets/...css">` 字面量引用。具体落点在 `resource/js/dist/assets/...` 或 `resource/css/...` 都可，整个 `resource/` 都是 STC 的 `STATIC_PATH`。
 - **manifest 不进入生产 CSS 链路**；阶段二 mock 的 `manifest_url($entry, 'css')` 仅 dev 调试用。
 - 同一页面多个入口共享 CSS 时的去重行为，待原项目实测确认；如 STC 不去重，则由 PHP 模板层显式控制。
 

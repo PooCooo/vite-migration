@@ -30,7 +30,10 @@
   <!-- 静态加载：_loader_res（dev/prod 通用） -->
   <script src="../resource/js/common/_loader_res.js"></script>
 
-  <!-- Prod mock：当前 IIFE 构建把 Vue SFC CSS 注入 JS；若后续抽 CSS，必须写成 /resource/... 字面量交给 STC -->
+  <!-- Prod mock：CSS 以 STC 可识别的 /resource/... 字面量写入模板 -->
+  <link rel="stylesheet" href="/resource/js/dist/assets/home-searchbox.css">
+  <link rel="stylesheet" href="/resource/js/dist/assets/home-skin.css">
+  <link rel="stylesheet" href="/resource/js/dist/assets/homeAI-homeAI.css">
 
   <!-- Dev-only：htmlInjector 在此注入 _loader_dev_shim；prod 下保持空 -->
   <!--LOADER-->

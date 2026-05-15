@@ -20,7 +20,7 @@ function scanModules(devDir, areaName) {
     .map((m) => ({
       entry: path.join(devDir, m, 'index.js'),
       file: `${areaName}/${m}.js`,
-      css: `assets/${areaName}-${m}[extname]`,
+      cssFile: `assets/${areaName}-${m}.css`,
       name: `Mock_${areaName}_${m}`.replace(/[^a-zA-Z0-9_$]/g, '_'),
     }))
 }
@@ -31,10 +31,34 @@ const entries = [
   {
     entry: path.join(DEV.HOME_AI, 'main.js'),
     file: 'homeAI/homeAI.js',
-    css: 'assets/homeAI-homeAI[extname]',
+    cssFile: 'assets/homeAI-homeAI.css',
     name: 'Mock_homeAI_homeAI',
   },
 ]
+
+function extractIifeCss(cssFile) {
+  return {
+    name: 'mock-extract-iife-css',
+    enforce: 'post',
+    renderChunk(code) {
+      const pattern = /var __vite_style__ = document\.createElement\('style'\);__vite_style__\.textContent = ([\s\S]*?);document\.head\.appendChild\(__vite_style__\);?/
+      const match = code.match(pattern)
+      if (!match) return null
+
+      const css = new Function(`return ${match[1]}`)()
+      this.emitFile({
+        type: 'asset',
+        fileName: cssFile,
+        source: css,
+      })
+
+      return {
+        code: code.replace(pattern, ''),
+        map: null,
+      }
+    },
+  }
+}
 
 rmSync(outDir, { recursive: true, force: true })
 
@@ -42,7 +66,7 @@ for (const item of entries) {
   await build({
     root,
     configFile: false,
-    plugins: [vue()],
+    plugins: [vue(), extractIifeCss(item.cssFile)],
     build: {
       outDir,
       emptyOutDir: false,
@@ -56,12 +80,7 @@ for (const item of entries) {
           name: item.name,
           globals: { vue: 'Vue' },
           entryFileNames: item.file,
-          assetFileNames: (assetInfo) => {
-            if (assetInfo.name && assetInfo.name.endsWith('.css')) {
-              return item.css
-            }
-            return 'assets/[name][extname]'
-          },
+          assetFileNames: 'assets/[name][extname]',
         },
       },
     },

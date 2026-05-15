@@ -35,7 +35,8 @@
   <script type="module" src="<?php echo dev_origin(); ?>/@vite/client"></script>
   <script src="<?php echo dev_origin(); ?>/resource/js/common/_loader_dev_shim.js"></script>
 <?php else: ?>
-  <!-- Prod：当前 IIFE 构建把 Vue SFC CSS 注入 JS；若后续抽 CSS，必须写成 /resource/... 字面量交给 STC -->
+  <!-- Prod：CSS 以 STC 可识别的 /resource/... 字面量写入模板 -->
+  <link rel="stylesheet" href="/resource/js/dist/assets/result-ai-searchbox.css">
 <?php endif; ?>
 </head>
 <body>
